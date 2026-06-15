@@ -1,0 +1,130 @@
+from pathlib import Path
+from urllib.parse import urlparse
+
+import requests
+from django.conf import settings
+
+from .models import ImageJob, VideoJob
+from . import providers
+from . import image_providers
+
+
+def submit_job(job: VideoJob) -> VideoJob:
+    provider = providers.get_provider(job.provider)
+    job.status = VideoJob.Status.PENDING
+    try:
+        job.remote_task_id = provider.submit(job)
+        job.status = VideoJob.Status.SUBMITTED
+        job.error_message = ""
+    except Exception as exc:
+        job.status = VideoJob.Status.FAILED
+        job.error_message = str(exc)
+    job.save()
+    return job
+
+
+def refresh_job(job: VideoJob) -> VideoJob:
+    if job.status in {VideoJob.Status.SUCCEEDED, VideoJob.Status.FAILED}:
+        return job
+    if not job.remote_task_id:
+        return job
+
+    provider = get_refresh_provider(job)
+    try:
+        result = provider.refresh(job)
+        job.status = result.get("status", job.status)
+        job.raw_response = result.get("raw_response", job.raw_response)
+        job.error_message = result.get("error_message", "")
+        result_url = result.get("result_url")
+        if job.status == VideoJob.Status.SUCCEEDED and result_url and not job.result_video:
+            path = download_file(result_url, job)
+            job.result_video.name = str(path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+    except Exception as exc:
+        job.status = VideoJob.Status.FAILED
+        job.error_message = str(exc)
+    job.save()
+    return job
+
+
+def get_refresh_provider(job: VideoJob):
+    if job.remote_task_id.startswith("mock-"):
+        return providers.MockVideoProvider(name=job.provider)
+    return providers.get_provider(job.provider)
+
+
+def download_file(url: str, job: VideoJob) -> Path:
+    results_dir = Path(settings.MEDIA_ROOT) / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(urlparse(url).path).suffix or ".mp4"
+    target = results_dir / f"job-{job.pk}{suffix}"
+    response = requests.get(url, stream=True, timeout=settings.VIDEO_DOWNLOAD_TIMEOUT)
+    response.raise_for_status()
+    with target.open("wb") as handle:
+        for chunk in response.iter_content(chunk_size=1024 * 128):
+            if chunk:
+                handle.write(chunk)
+    return target
+
+
+def submit_image_job(job: ImageJob) -> ImageJob:
+    provider = image_providers.get_image_provider(job.provider)
+    job.status = ImageJob.Status.PENDING
+    try:
+        result = provider.submit(job)
+        apply_image_result(job, result)
+        job.error_message = ""
+    except Exception as exc:
+        job.status = ImageJob.Status.FAILED
+        job.error_message = str(exc)
+    job.save()
+    return job
+
+
+def refresh_image_job(job: ImageJob) -> ImageJob:
+    if job.status in {ImageJob.Status.SUCCEEDED, ImageJob.Status.FAILED}:
+        return job
+    if not job.remote_task_id:
+        return job
+
+    provider = get_image_refresh_provider(job)
+    try:
+        result = provider.refresh(job)
+        apply_image_result(job, result)
+    except Exception as exc:
+        job.status = ImageJob.Status.FAILED
+        job.error_message = str(exc)
+    job.save()
+    return job
+
+
+def apply_image_result(job: ImageJob, result: dict) -> None:
+    job.status = result.get("status", job.status)
+    job.remote_task_id = result.get("remote_task_id", job.remote_task_id)
+    job.raw_response = result.get("raw_response", job.raw_response)
+    job.error_message = result.get("error_message", "")
+    result_urls = result.get("result_urls") or []
+    if job.status == ImageJob.Status.SUCCEEDED and result_urls and not job.result_images:
+        job.result_images = [
+            str(download_image(url, job, index).relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+            for index, url in enumerate(result_urls, start=1)
+        ]
+
+
+def get_image_refresh_provider(job: ImageJob):
+    if job.remote_task_id.startswith("mock-image-"):
+        return image_providers.MockImageProvider(name=job.provider)
+    return image_providers.get_image_provider(job.provider)
+
+
+def download_image(url: str, job: ImageJob, index: int) -> Path:
+    images_dir = Path(settings.MEDIA_ROOT) / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(urlparse(url).path).suffix or ".png"
+    target = images_dir / f"job-{job.pk}-{index}{suffix}"
+    response = requests.get(url, stream=True, timeout=settings.VIDEO_DOWNLOAD_TIMEOUT)
+    response.raise_for_status()
+    with target.open("wb") as handle:
+        for chunk in response.iter_content(chunk_size=1024 * 128):
+            if chunk:
+                handle.write(chunk)
+    return target

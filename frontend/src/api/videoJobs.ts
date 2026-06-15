@@ -1,0 +1,55 @@
+import axios from 'axios'
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000/api',
+})
+
+export type JobStatus = 'pending' | 'submitted' | 'processing' | 'succeeded' | 'failed'
+export type ProviderName = 'volcengine' | 'aliyun'
+
+export interface VideoJob {
+  id: number
+  provider: ProviderName
+  provider_label: string
+  status: JobStatus
+  prompt: string
+  aspect_ratio: string
+  duration: number
+  source_image_url: string
+  remote_task_id: string
+  result_video_url: string
+  error_message: string
+  created_at: string
+  updated_at: string
+}
+
+export interface VideoJobList {
+  results: VideoJob[]
+}
+
+export async function listVideoJobs(): Promise<VideoJobList> {
+  const response = await api.get<VideoJobList>('/video-jobs/')
+  return response.data
+}
+
+export async function getVideoJob(id: number): Promise<VideoJob> {
+  const response = await api.get<VideoJob>(`/video-jobs/${id}/`)
+  return response.data
+}
+
+export async function createVideoJob(payload: {
+  provider: ProviderName
+  prompt: string
+  aspect_ratio: string
+  duration: number
+  source_image: File
+}): Promise<VideoJob> {
+  const form = new FormData()
+  form.append('provider', payload.provider)
+  form.append('prompt', payload.prompt)
+  form.append('aspect_ratio', payload.aspect_ratio)
+  form.append('duration', String(payload.duration))
+  form.append('source_image', payload.source_image)
+  const response = await api.post<VideoJob>('/video-jobs/', form)
+  return response.data
+}
