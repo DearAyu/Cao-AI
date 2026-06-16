@@ -19,6 +19,7 @@ vi.mock('./api/imageJobs', () => ({
 
 describe('Cao AI workbench', () => {
   beforeEach(() => {
+    ;(createVideoJob as Mock).mockClear()
     ;(listVideoJobs as Mock).mockResolvedValue({ results: [] })
     ;(listImageJobs as Mock).mockResolvedValue({ results: [] })
   })
@@ -59,6 +60,7 @@ describe('Cao AI workbench', () => {
       prompt: '',
       aspect_ratio: '1:1',
       duration: 5,
+      resolution: '720p',
       source_image_url: '',
       remote_task_id: 'mock-video',
       result_video_url: '',
@@ -81,6 +83,43 @@ describe('Cao AI workbench', () => {
     }))
   })
 
+  it('submits 15 second duration and selected resolution', async () => {
+    ;(createVideoJob as Mock).mockResolvedValueOnce({
+      id: 3,
+      provider: 'volcengine',
+      provider_label: '火山 Seedance',
+      model_name: 'doubao-seedance-2-0-fast-260128',
+      status: 'submitted',
+      prompt: '',
+      aspect_ratio: '1:1',
+      duration: 15,
+      resolution: '480p',
+      source_image_url: '',
+      remote_task_id: 'mock-video-15s',
+      result_video_url: '',
+      error_message: '',
+      created_at: '2026-06-16T00:00:00Z',
+      updated_at: '2026-06-16T00:00:00Z',
+    })
+    const wrapper = mountApp()
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'product.png', { type: 'image/png' })],
+    })
+
+    await input.trigger('change')
+    const selects = wrapper.findAllComponents({ name: 'ASelect' })
+    await selects[2].vm.$emit('update:value', 15)
+    if (selects[3]) await selects[3].vm.$emit('update:value', '480p')
+    await wrapper.find('[data-testid="generate-button"]').trigger('click')
+
+    expect(wrapper.text()).toContain('分辨率')
+    expect(createVideoJob).toHaveBeenCalledWith(expect.objectContaining({
+      duration: 15,
+      resolution: '480p',
+    }))
+  })
+
   it('infers Aliyun provider from the wan2.7 video model', async () => {
     ;(createVideoJob as Mock).mockResolvedValueOnce({
       id: 2,
@@ -91,6 +130,7 @@ describe('Cao AI workbench', () => {
       prompt: '',
       aspect_ratio: '1:1',
       duration: 5,
+      resolution: '720p',
       source_image_url: '',
       remote_task_id: 'mock-aliyun-video',
       result_video_url: '',

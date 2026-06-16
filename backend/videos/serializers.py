@@ -20,6 +20,7 @@ class VideoJobSerializer(serializers.ModelSerializer):
             "prompt",
             "aspect_ratio",
             "duration",
+            "resolution",
             "source_image",
             "source_image_url",
             "remote_task_id",

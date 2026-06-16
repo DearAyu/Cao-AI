@@ -19,6 +19,7 @@ class VideoJob(models.Model):
     prompt = models.TextField(blank=True)
     aspect_ratio = models.CharField(max_length=16, default="1:1")
     duration = models.PositiveSmallIntegerField(default=5)
+    resolution = models.CharField(max_length=16, default="720p")
     source_image = models.FileField(upload_to="uploads/")
     remote_task_id = models.CharField(max_length=255, blank=True)
     result_video = models.FileField(upload_to="results/", blank=True)

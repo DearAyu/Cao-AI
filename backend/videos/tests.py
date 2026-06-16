@@ -59,12 +59,14 @@ class VideoJobApiTests(TestCase):
                 "source_image": self.image_file(),
                 "aspect_ratio": "1:1",
                 "duration": 5,
+                "resolution": "1080p",
             },
             format="multipart",
         )
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["status"], "submitted")
+        self.assertEqual(response.data["resolution"], "1080p")
         self.assertTrue(response.data["remote_task_id"].startswith("mock-"))
 
         list_response = self.client.get(reverse("video-job-list"))
@@ -133,6 +135,7 @@ class AliWanxiangProviderTests(TestCase):
             prompt="展示商品质感",
             aspect_ratio="9:16",
             duration=10,
+            resolution="480p",
             source_image=SimpleUploadedFile(
                 "product.png",
                 b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR",
@@ -154,7 +157,7 @@ class AliWanxiangProviderTests(TestCase):
         self.assertEqual(task_id, "task-1")
         self.assertTrue(payload["input"]["img_url"].startswith("data:image/png;base64,"))
         self.assertNotIn("ratio", payload["parameters"])
-        self.assertEqual(payload["parameters"]["resolution"], "720P")
+        self.assertEqual(payload["parameters"]["resolution"], "480P")
         self.assertEqual(payload["parameters"]["duration"], 5)
 
     @override_settings(ALIYUN_MODEL="wan2.7-i2v")
@@ -164,6 +167,7 @@ class AliWanxiangProviderTests(TestCase):
             prompt="展示商品质感",
             aspect_ratio="9:16",
             duration=10,
+            resolution="480p",
             source_image=SimpleUploadedFile(
                 "product.png",
                 b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR",
@@ -195,6 +199,7 @@ class AliWanxiangProviderTests(TestCase):
             prompt="展示商品质感",
             aspect_ratio="9:16",
             duration=10,
+            resolution="480p",
             source_image=SimpleUploadedFile(
                 "product.png",
                 b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR",
@@ -216,6 +221,7 @@ class AliWanxiangProviderTests(TestCase):
         self.assertEqual(task_id, "task-job-model")
         self.assertEqual(payload["model"], "wan2.7-i2v")
         self.assertIn("media", payload["input"])
+        self.assertEqual(payload["parameters"]["resolution"], "480P")
 
     def test_failed_refresh_uses_nested_aliyun_error_message(self):
         result = AliWanxiangProvider().refresh_result_from_data(
@@ -245,6 +251,7 @@ class VolcengineSeedanceProviderTests(TestCase):
             prompt="Create a premium product reveal",
             aspect_ratio="9:16",
             duration=5,
+            resolution="1080p",
             source_image=SimpleUploadedFile(
                 "product.png",
                 b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR",
@@ -267,6 +274,7 @@ class VolcengineSeedanceProviderTests(TestCase):
         self.assertEqual(payload["model"], "doubao-seedance-2-0-fast-260128")
         self.assertEqual(payload["content"][1]["image_url"].keys(), {"url"})
         self.assertTrue(payload["content"][1]["image_url"]["url"].startswith("data:image/png;base64,"))
+        self.assertEqual(payload["resolution"], "1080p")
 
 
 @override_settings(MEDIA_ROOT=MEDIA_ROOT, VIDEO_PROVIDER_FORCE_MOCK=True)

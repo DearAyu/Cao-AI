@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   CloudUploadOutlined,
   FileImageOutlined,
@@ -32,6 +32,7 @@ const videoModel = ref('doubao-seedance-2-0-fast-260128')
 const videoPrompt = ref('用柔和的摄影棚灯光展示商品，镜头缓慢推进，突出质感和跨境电商主图卖点。')
 const videoAspectRatio = ref('1:1')
 const videoDuration = ref(5)
+const videoResolution = ref('720p')
 const videoImageFile = ref<File | null>(null)
 const videoImagePreview = ref('')
 const currentVideoJob = ref<VideoJob | null>(null)
@@ -81,6 +82,18 @@ const aspectRatioOptions = [
   { label: '16:9', value: '16:9' },
 ]
 
+const durationOptions = [
+  { label: '5 秒', value: 5 },
+  { label: '10 秒', value: 10 },
+  { label: '15 秒', value: 15 },
+]
+
+const resolutionOptions = [
+  { label: '480p', value: '480p' },
+  { label: '720p', value: '720p' },
+  { label: '1080p', value: '1080p' },
+]
+
 const videoPromptPresets = [
   '柔和棚拍光，镜头缓慢推进，突出商品材质和主图卖点。',
   '干净白底到高级场景的转场，适合跨境电商详情页首屏。',
@@ -103,6 +116,10 @@ const statusText: Record<string, string> = {
 
 const canGenerateVideo = computed(() => Boolean(videoImageFile.value) && !isSubmittingVideo.value)
 const canGenerateImage = computed(() => Boolean(imageFile.value) && !isSubmittingImage.value)
+const activeResolutionOptions = computed(() => {
+  if (videoModel.value === 'doubao-seedance-2-0-260128') return resolutionOptions
+  return resolutionOptions.filter((option) => option.value !== '1080p')
+})
 const activeVideo = computed(() => currentVideoJob.value?.result_video_url || '')
 const activeVideoImage = computed(() => videoImagePreview.value || currentVideoJob.value?.source_image_url || '')
 const activeImagePreview = computed(() => imagePreview.value || currentImageJob.value?.source_image_url || '')
@@ -120,6 +137,12 @@ const historyItems = computed(() =>
 function providerForVideoModel(modelName: string): ProviderName {
   return modelName.startsWith('wan') ? 'aliyun' : 'volcengine'
 }
+
+watch(videoModel, () => {
+  if (!activeResolutionOptions.value.some((option) => option.value === videoResolution.value)) {
+    videoResolution.value = '720p'
+  }
+})
 
 function safeResults<T>(list: { results?: T[] } | unknown): T[] {
   if (list && typeof list === 'object' && Array.isArray((list as { results?: unknown }).results)) {
@@ -182,6 +205,7 @@ async function submitVideoJob() {
       prompt: videoPrompt.value,
       aspect_ratio: videoAspectRatio.value,
       duration: videoDuration.value,
+      resolution: videoResolution.value,
       source_image: videoImageFile.value,
     })
     videoJobs.value = [currentVideoJob.value, ...videoJobs.value.filter((item) => item.id !== currentVideoJob.value?.id)]
@@ -335,7 +359,7 @@ onUnmounted(() => {
         <section class="flow-strip" aria-label="创作流程">
           <div class="flow-heading">创作流程</div>
           <div><span>01</span><strong>导入商品图</strong><small>{{ videoImageFile ? '素材已就绪' : '等待上传' }}</small></div>
-          <div><span>02</span><strong>设置镜头语言</strong><small>{{ videoAspectRatio }} / {{ videoDuration }} 秒</small></div>
+          <div><span>02</span><strong>设置镜头语言</strong><small>{{ videoAspectRatio }} / {{ videoDuration }} 秒 / {{ videoResolution }}</small></div>
           <div><span>03</span><strong>生成与回看</strong><small>{{ videoStatusLabel }}</small></div>
         </section>
 
@@ -382,7 +406,10 @@ onUnmounted(() => {
                   <a-select v-model:value="videoAspectRatio" :options="aspectRatioOptions" />
                 </a-form-item>
                 <a-form-item label="视频时长">
-                  <a-select v-model:value="videoDuration" :options="[{ label: '5 秒', value: 5 }, { label: '10 秒', value: 10 }]" />
+                  <a-select v-model:value="videoDuration" :options="durationOptions" />
+                </a-form-item>
+                <a-form-item label="分辨率">
+                  <a-select v-model:value="videoResolution" :options="activeResolutionOptions" />
                 </a-form-item>
               </div>
             </a-form>
@@ -424,7 +451,7 @@ onUnmounted(() => {
             <button v-for="job in videoJobs" :key="job.id" class="job-row" @click="selectVideoJob(job)">
               <span>#{{ job.id }}</span>
               <strong>{{ job.provider_label }}</strong>
-              <span>{{ job.aspect_ratio }} / {{ job.duration }} 秒</span>
+              <span>{{ job.aspect_ratio }} / {{ job.duration }} 秒 / {{ job.resolution }}</span>
               <a-tag :color="statusColor(job.status)">{{ statusText[job.status] }}</a-tag>
             </button>
           </div>

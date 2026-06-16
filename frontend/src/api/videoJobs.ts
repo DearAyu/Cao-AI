@@ -16,6 +16,7 @@ export interface VideoJob {
   prompt: string
   aspect_ratio: string
   duration: number
+  resolution: string
   source_image_url: string
   remote_task_id: string
   result_video_url: string
@@ -44,6 +45,7 @@ export async function createVideoJob(payload: {
   prompt: string
   aspect_ratio: string
   duration: number
+  resolution: string
   source_image: File
 }): Promise<VideoJob> {
   const form = new FormData()
@@ -52,6 +54,7 @@ export async function createVideoJob(payload: {
   form.append('prompt', payload.prompt)
   form.append('aspect_ratio', payload.aspect_ratio)
   form.append('duration', String(payload.duration))
+  form.append('resolution', payload.resolution)
   form.append('source_image', payload.source_image)
   const response = await api.post<VideoJob>('/video-jobs/', form)
   return response.data

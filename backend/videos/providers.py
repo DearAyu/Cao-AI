@@ -88,16 +88,17 @@ def is_wan27_model(model_name: str | None = None) -> bool:
 def build_aliyun_payload(job: VideoJob) -> dict[str, Any]:
     image_url = image_as_data_url(job)
     model_name = job.model_name or settings.ALIYUN_MODEL
+    resolution = (job.resolution or "720p").upper()
     payload: dict[str, Any] = {
         "model": model_name,
         "input": {"prompt": job.prompt or "Create a polished ecommerce product video."},
     }
     if is_wan27_model(model_name):
         payload["input"]["media"] = [{"type": "first_frame", "url": image_url}]
-        payload["parameters"] = {"duration": job.duration}
+        payload["parameters"] = {"duration": job.duration, "resolution": resolution}
     else:
         payload["input"]["img_url"] = image_url
-        payload["parameters"] = {"duration": aliyun_duration(job.duration), "resolution": "720P"}
+        payload["parameters"] = {"duration": aliyun_duration(job.duration), "resolution": resolution}
     return payload
 
 
@@ -144,6 +145,7 @@ class VolcengineSeedanceProvider(BaseVideoProvider):
             ],
             "duration": job.duration,
             "ratio": job.aspect_ratio,
+            "resolution": job.resolution or "720p",
         }
         job.raw_request = payload
         response = request_with_retries(
