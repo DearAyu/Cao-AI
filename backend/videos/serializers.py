@@ -15,6 +15,7 @@ class VideoJobSerializer(serializers.ModelSerializer):
             "id",
             "provider",
             "provider_label",
+            "model_name",
             "status",
             "prompt",
             "aspect_ratio",

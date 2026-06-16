@@ -3,7 +3,7 @@ import Antd from 'ant-design-vue'
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import App from './App.vue'
 import { listImageJobs } from './api/imageJobs'
-import { listVideoJobs } from './api/videoJobs'
+import { createVideoJob, listVideoJobs } from './api/videoJobs'
 
 vi.mock('./api/videoJobs', () => ({
   createVideoJob: vi.fn(),
@@ -36,7 +36,82 @@ describe('Cao AI workbench', () => {
     expect(wrapper.text()).toContain('Cao AI')
     expect(wrapper.text()).toContain('视频生成')
     expect(wrapper.text()).toContain('图片生成')
-    expect(wrapper.text()).toContain('阿里万相')
+    expect(wrapper.text()).toContain('Doubao-Seedance-2.0-fast')
+  })
+
+  it('uses video model select and allows longer prompts', () => {
+    const wrapper = mountApp()
+
+    expect(wrapper.text()).toContain('视频模型')
+    expect(wrapper.text()).toContain('Doubao-Seedance-2.0-fast')
+    expect(wrapper.text()).not.toContain('视频厂商')
+    expect(wrapper.text()).not.toContain('wanx2.1-i2v-turbo')
+    expect(wrapper.find('textarea').attributes('maxlength')).toBe('1500')
+  })
+
+  it('submits the Volcengine model id instead of display label', async () => {
+    ;(createVideoJob as Mock).mockResolvedValueOnce({
+      id: 1,
+      provider: 'volcengine',
+      provider_label: '火山 Seedance',
+      model_name: 'doubao-seedance-2-0-fast-260128',
+      status: 'submitted',
+      prompt: '',
+      aspect_ratio: '1:1',
+      duration: 5,
+      source_image_url: '',
+      remote_task_id: 'mock-video',
+      result_video_url: '',
+      error_message: '',
+      created_at: '2026-06-16T00:00:00Z',
+      updated_at: '2026-06-16T00:00:00Z',
+    })
+    const wrapper = mountApp()
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'product.png', { type: 'image/png' })],
+    })
+
+    await input.trigger('change')
+    await wrapper.find('[data-testid="generate-button"]').trigger('click')
+
+    expect(createVideoJob).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'volcengine',
+      model_name: 'doubao-seedance-2-0-fast-260128',
+    }))
+  })
+
+  it('infers Aliyun provider from the wan2.7 video model', async () => {
+    ;(createVideoJob as Mock).mockResolvedValueOnce({
+      id: 2,
+      provider: 'aliyun',
+      provider_label: '阿里万相',
+      model_name: 'wan2.7-i2v',
+      status: 'submitted',
+      prompt: '',
+      aspect_ratio: '1:1',
+      duration: 5,
+      source_image_url: '',
+      remote_task_id: 'mock-aliyun-video',
+      result_video_url: '',
+      error_message: '',
+      created_at: '2026-06-16T00:00:00Z',
+      updated_at: '2026-06-16T00:00:00Z',
+    })
+    const wrapper = mountApp()
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'product.png', { type: 'image/png' })],
+    })
+
+    await input.trigger('change')
+    await wrapper.findComponent({ name: 'ASelect' }).vm.$emit('update:value', 'wan2.7-i2v')
+    await wrapper.find('[data-testid="generate-button"]').trigger('click')
+
+    expect(createVideoJob).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'aliyun',
+      model_name: 'wan2.7-i2v',
+    }))
   })
 
   it('renders the studio redesign structure', () => {

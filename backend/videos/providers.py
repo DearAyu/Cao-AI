@@ -81,17 +81,18 @@ def aliyun_duration(duration: int) -> int:
     return duration if duration in {3, 4, 5} else 5
 
 
-def is_wan27_model() -> bool:
-    return str(settings.ALIYUN_MODEL).startswith("wan2.7")
+def is_wan27_model(model_name: str | None = None) -> bool:
+    return str(model_name or settings.ALIYUN_MODEL).startswith("wan2.7")
 
 
 def build_aliyun_payload(job: VideoJob) -> dict[str, Any]:
     image_url = image_as_data_url(job)
+    model_name = job.model_name or settings.ALIYUN_MODEL
     payload: dict[str, Any] = {
-        "model": settings.ALIYUN_MODEL,
+        "model": model_name,
         "input": {"prompt": job.prompt or "Create a polished ecommerce product video."},
     }
-    if is_wan27_model():
+    if is_wan27_model(model_name):
         payload["input"]["media"] = [{"type": "first_frame", "url": image_url}]
         payload["parameters"] = {"duration": job.duration}
     else:
@@ -136,10 +137,10 @@ class VolcengineSeedanceProvider(BaseVideoProvider):
 
     def submit(self, job: VideoJob) -> str:
         payload = {
-            "model": settings.VOLCENGINE_MODEL,
+            "model": job.model_name or settings.VOLCENGINE_MODEL,
             "content": [
                 {"type": "text", "text": job.prompt or "Create a polished ecommerce product video."},
-                {"type": "image_url", "image_url": image_as_data_url(job)},
+                {"type": "image_url", "image_url": {"url": image_as_data_url(job)}},
             ],
             "duration": job.duration,
             "ratio": job.aspect_ratio,

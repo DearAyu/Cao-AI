@@ -188,6 +188,35 @@ class AliWanxiangProviderTests(TestCase):
         self.assertTrue(payload["input"]["media"][0]["url"].startswith("data:image/png;base64,"))
         self.assertEqual(payload["parameters"]["duration"], 10)
 
+    def test_submit_uses_job_model_name_for_aliyun_payload(self):
+        job = VideoJob.objects.create(
+            provider="aliyun",
+            model_name="wan2.7-i2v",
+            prompt="展示商品质感",
+            aspect_ratio="9:16",
+            duration=10,
+            source_image=SimpleUploadedFile(
+                "product.png",
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR",
+                content_type="image/png",
+            ),
+        )
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"output": {"task_id": "task-job-model", "task_status": "PENDING"}}
+
+        with patch("videos.providers.requests.post", return_value=Response()) as post:
+            task_id = AliWanxiangProvider().submit(job)
+
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(task_id, "task-job-model")
+        self.assertEqual(payload["model"], "wan2.7-i2v")
+        self.assertIn("media", payload["input"])
+
     def test_failed_refresh_uses_nested_aliyun_error_message(self):
         result = AliWanxiangProvider().refresh_result_from_data(
             {
@@ -212,6 +241,7 @@ class VolcengineSeedanceProviderTests(TestCase):
     def test_submit_sends_base64_image_content(self):
         job = VideoJob.objects.create(
             provider="volcengine",
+            model_name="doubao-seedance-2-0-fast-260128",
             prompt="Create a premium product reveal",
             aspect_ratio="9:16",
             duration=5,
@@ -234,7 +264,9 @@ class VolcengineSeedanceProviderTests(TestCase):
 
         payload = post.call_args.kwargs["json"]
         self.assertEqual(task_id, "seedance-task-1")
-        self.assertTrue(payload["content"][1]["image_url"].startswith("data:image/png;base64,"))
+        self.assertEqual(payload["model"], "doubao-seedance-2-0-fast-260128")
+        self.assertEqual(payload["content"][1]["image_url"].keys(), {"url"})
+        self.assertTrue(payload["content"][1]["image_url"]["url"].startswith("data:image/png;base64,"))
 
 
 @override_settings(MEDIA_ROOT=MEDIA_ROOT, VIDEO_PROVIDER_FORCE_MOCK=True)

@@ -14,6 +14,7 @@ class VideoJob(models.Model):
         FAILED = "failed", "Failed"
 
     provider = models.CharField(max_length=32, choices=Provider.choices)
+    model_name = models.CharField(max_length=80, blank=True)
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.PENDING)
     prompt = models.TextField(blank=True)
     aspect_ratio = models.CharField(max_length=16, default="1:1")

@@ -11,6 +11,7 @@ export interface VideoJob {
   id: number
   provider: ProviderName
   provider_label: string
+  model_name: string
   status: JobStatus
   prompt: string
   aspect_ratio: string
@@ -39,6 +40,7 @@ export async function getVideoJob(id: number): Promise<VideoJob> {
 
 export async function createVideoJob(payload: {
   provider: ProviderName
+  model_name?: string
   prompt: string
   aspect_ratio: string
   duration: number
@@ -46,6 +48,7 @@ export async function createVideoJob(payload: {
 }): Promise<VideoJob> {
   const form = new FormData()
   form.append('provider', payload.provider)
+  if (payload.model_name) form.append('model_name', payload.model_name)
   form.append('prompt', payload.prompt)
   form.append('aspect_ratio', payload.aspect_ratio)
   form.append('duration', String(payload.duration))

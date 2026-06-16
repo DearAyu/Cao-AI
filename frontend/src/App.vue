@@ -28,7 +28,7 @@ type WorkspaceMode = 'video' | 'image' | 'materials' | 'history'
 
 const mode = ref<WorkspaceMode>('video')
 
-const videoProvider = ref<ProviderName>('aliyun')
+const videoModel = ref('doubao-seedance-2-0-fast-260128')
 const videoPrompt = ref('用柔和的摄影棚灯光展示商品，镜头缓慢推进，突出质感和跨境电商主图卖点。')
 const videoAspectRatio = ref('1:1')
 const videoDuration = ref(5)
@@ -52,9 +52,22 @@ const isSubmittingImage = ref(false)
 let videoPollTimer: number | undefined
 let imagePollTimer: number | undefined
 
-const videoProviderOptions = [
-  { label: '火山 Seedance', value: 'volcengine' },
-  { label: '阿里万相', value: 'aliyun' },
+const videoModelOptions = [
+  {
+    label: 'Doubao-Seedance-2.0-fast',
+    value: 'doubao-seedance-2-0-fast-260128',
+    description: '速度更快，适合批量预览和快速验证镜头效果',
+  },
+  {
+    label: 'Doubao-Seedance-2.0',
+    value: 'doubao-seedance-2-0-260128',
+    description: '质量更稳，适合最终成片和重点商品展示',
+  },
+  {
+    label: '阿里万相 wan2.7-i2v',
+    value: 'wan2.7-i2v',
+    description: '万相 2.7 图生视频协议，适合使用更长时长和新媒体输入格式',
+  },
 ]
 
 const imageProviderOptions = [
@@ -103,6 +116,10 @@ const historyItems = computed(() =>
     ...imageJobs.value.map((job) => ({ kind: '图片', id: job.id, provider: job.provider_label, status: job.status, created_at: job.created_at })),
   ].sort((a, b) => b.created_at.localeCompare(a.created_at)),
 )
+
+function providerForVideoModel(modelName: string): ProviderName {
+  return modelName.startsWith('wan') ? 'aliyun' : 'volcengine'
+}
 
 function safeResults<T>(list: { results?: T[] } | unknown): T[] {
   if (list && typeof list === 'object' && Array.isArray((list as { results?: unknown }).results)) {
@@ -160,7 +177,8 @@ async function submitVideoJob() {
   isSubmittingVideo.value = true
   try {
     currentVideoJob.value = await createVideoJob({
-      provider: videoProvider.value,
+      provider: providerForVideoModel(videoModel.value),
+      model_name: videoModel.value,
       prompt: videoPrompt.value,
       aspect_ratio: videoAspectRatio.value,
       duration: videoDuration.value,
@@ -338,11 +356,21 @@ onUnmounted(() => {
             </label>
 
             <a-form layout="vertical">
-              <a-form-item label="厂商">
-                <a-segmented v-model:value="videoProvider" block :options="videoProviderOptions" />
+              <a-form-item label="视频模型">
+                <a-select v-model:value="videoModel">
+                  <a-select-option v-for="model in videoModelOptions" :key="model.value" :value="model.value">
+                    <div class="model-option">
+                      <strong>{{ model.label }}</strong>
+                      <span>{{ model.description }}</span>
+                    </div>
+                  </a-select-option>
+                </a-select>
+                <p class="field-hint">
+                  {{ videoModelOptions.find((model) => model.value === videoModel)?.description }}
+                </p>
               </a-form-item>
               <a-form-item label="影棚提示词">
-                <a-textarea v-model:value="videoPrompt" :rows="4" :maxlength="500" show-count />
+                <a-textarea v-model:value="videoPrompt" :rows="5" :maxLength="1500" show-count />
               </a-form-item>
               <div class="prompt-chips">
                 <button v-for="prompt in videoPromptPresets" :key="prompt" type="button" @click="useVideoPreset(prompt)">
@@ -446,7 +474,7 @@ onUnmounted(() => {
                 <a-segmented v-model:value="imageProvider" block :options="imageProviderOptions" />
               </a-form-item>
               <a-form-item label="场景提示词">
-                <a-textarea v-model:value="imagePrompt" :rows="4" :maxlength="500" show-count />
+                <a-textarea v-model:value="imagePrompt" :rows="5" :maxLength="1500" show-count />
               </a-form-item>
               <div class="prompt-chips">
                 <button v-for="prompt in imagePromptPresets" :key="prompt" type="button" @click="useImagePreset(prompt)">
