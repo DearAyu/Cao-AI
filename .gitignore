@@ -6,3 +6,5 @@ backend/media/
 backend/**/__pycache__/
 frontend/node_modules/
 frontend/dist/
+.codex-logs/
+.superpowers/

@@ -143,6 +143,7 @@ PROVIDER_IMAGE_MAX_BYTES = int(os.getenv("PROVIDER_IMAGE_MAX_BYTES", "2000000"))
 VOLCENGINE_API_KEY = os.getenv("VOLCENGINE_API_KEY", "")
 VOLCENGINE_BASE_URL = os.getenv("VOLCENGINE_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
 VOLCENGINE_MODEL = os.getenv("VOLCENGINE_MODEL", "doubao-seedance-2-0-fast-260128")
+DOUBAO_SEED_MODEL = os.getenv("DOUBAO_SEED_MODEL", "doubao-seed-2-0-pro-260215")
 
 ALIYUN_API_KEY = os.getenv("ALIYUN_API_KEY", "")
 ALIYUN_WORKSPACE_ID = os.getenv("ALIYUN_WORKSPACE_ID", "")

@@ -1,9 +1,12 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from .views import ImageJobViewSet, VideoJobViewSet
+from .views import ImageJobViewSet, PromptAnalysisView, VideoJobViewSet
 
 router = DefaultRouter()
 router.register("video-jobs", VideoJobViewSet, basename="video-job")
 router.register("image-jobs", ImageJobViewSet, basename="image-job")
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("prompt-analysis/", PromptAnalysisView.as_view(), name="prompt-analysis"),
+] + router.urls

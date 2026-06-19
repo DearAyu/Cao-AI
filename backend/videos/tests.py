@@ -1,3 +1,4 @@
+import base64
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -9,6 +10,13 @@ from rest_framework.test import APIClient
 
 from .image_providers import AliWanImageProvider, SeedreamImageProvider
 from .models import ImageJob, VideoJob
+from .prompt_analysis import (
+    PROMPT_ANALYSIS_INSTRUCTION,
+    PromptAnalysisError,
+    analyze_product_image,
+    extract_prompt,
+    image_data_url,
+)
 from .providers import AliWanxiangProvider, VolcengineSeedanceProvider
 
 
@@ -275,6 +283,146 @@ class VolcengineSeedanceProviderTests(TestCase):
         self.assertEqual(payload["content"][1]["image_url"].keys(), {"url"})
         self.assertTrue(payload["content"][1]["image_url"]["url"].startswith("data:image/png;base64,"))
         self.assertEqual(payload["resolution"], "1080p")
+
+
+@override_settings(
+    VIDEO_PROVIDER_FORCE_MOCK=False,
+    VOLCENGINE_API_KEY="test-key",
+    VOLCENGINE_BASE_URL="https://ark.example/api/v3",
+    DOUBAO_SEED_MODEL="doubao-seed-test-model",
+)
+class PromptAnalysisProviderTests(TestCase):
+    ONE_PIXEL_PNG = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+
+    def image_file(self):
+        return SimpleUploadedFile("product.png", self.ONE_PIXEL_PNG, content_type="image/png")
+
+    def test_analyze_uses_configured_model_and_multimodal_content(self):
+        class Response:
+            def json(self):
+                return {"choices": [{"message": {"content": "高质感商品展示视频"}}]}
+
+        with patch("videos.prompt_analysis.request_with_retries", return_value=Response()) as request:
+            with patch("videos.prompt_analysis.raise_for_bad_response"):
+                result = analyze_product_image(self.image_file())
+
+        self.assertEqual(result, "高质感商品展示视频")
+        self.assertEqual(request.call_args.args[:3], ("post", "https://ark.example/api/v3/chat/completions", "Doubao prompt analysis"))
+        payload = request.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], "doubao-seed-test-model")
+        self.assertEqual(payload["max_tokens"], 1000)
+        content = payload["messages"][0]["content"]
+        self.assertEqual(content[0], {"type": "image_url", "image_url": {"url": image_data_url(self.image_file())}})
+        self.assertEqual(content[1], {"type": "text", "text": PROMPT_ANALYSIS_INSTRUCTION})
+
+    def test_image_data_url_reads_valid_png_and_rewinds_file(self):
+        uploaded_file = self.image_file()
+
+        result = image_data_url(uploaded_file)
+
+        prefix, encoded = result.split(",", 1)
+        self.assertEqual(prefix, "data:image/png;base64")
+        self.assertEqual(base64.b64decode(encoded), self.ONE_PIXEL_PNG)
+        self.assertEqual(uploaded_file.tell(), 0)
+
+    def test_instruction_requests_a_single_chinese_video_prompt(self):
+        for requirement in ("一个", "中文", "商品", "卖点", "影棚灯光", "镜头运动", "节奏", "构图", "2500"):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, PROMPT_ANALYSIS_INSTRUCTION)
+
+    def test_extract_prompt_supports_string_and_list_text_content(self):
+        string_data = {"choices": [{"message": {"content": "商品缓慢旋转展示"}}]}
+        list_data = {
+            "choices": [{"message": {"content": [{"type": "text", "text": "镜头平滑推进"}]}}]
+        }
+
+        self.assertEqual(extract_prompt(string_data), "商品缓慢旋转展示")
+        self.assertEqual(extract_prompt(list_data), "镜头平滑推进")
+
+    def test_extract_prompt_rejects_missing_output(self):
+        with self.assertRaises(PromptAnalysisError):
+            extract_prompt({"choices": [{"message": {"content": []}}]})
+
+    def test_extract_prompt_rejects_output_over_2500_characters(self):
+        data = {"choices": [{"message": {"content": "商" * 2501}}]}
+
+        with self.assertRaises(PromptAnalysisError):
+            extract_prompt(data)
+
+
+class PromptAnalysisApiTests(TestCase):
+    ONE_PIXEL_PNG = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def image_file(self, content=None):
+        return SimpleUploadedFile(
+            "product.png",
+            content if content is not None else self.ONE_PIXEL_PNG,
+            content_type="image/png",
+        )
+
+    def test_missing_image_returns_400(self):
+        response = self.client.post(reverse("prompt-analysis"), {}, format="multipart")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("image", response.data)
+
+    def test_non_image_upload_returns_400(self):
+        upload = SimpleUploadedFile("notes.txt", b"not an image", content_type="text/plain")
+
+        response = self.client.post(
+            reverse("prompt-analysis"), {"image": upload}, format="multipart"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("image", response.data)
+
+    @override_settings(PROVIDER_IMAGE_MAX_BYTES=67)
+    def test_oversized_image_returns_400_with_chinese_message(self):
+        response = self.client.post(
+            reverse("prompt-analysis"),
+            {"image": self.image_file()},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("image", response.data)
+        self.assertIn("图片", str(response.data["image"][0]))
+
+    @override_settings(VIDEO_PROVIDER_FORCE_MOCK=True)
+    def test_mock_mode_returns_video_prompt_without_creating_jobs(self):
+        response = self.client.post(
+            reverse("prompt-analysis"),
+            {"image": self.image_file()},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(response.data), {"prompt"})
+        self.assertTrue(response.data["prompt"].strip())
+        self.assertLessEqual(len(response.data["prompt"]), 2500)
+        self.assertEqual(VideoJob.objects.count(), 0)
+        self.assertEqual(ImageJob.objects.count(), 0)
+
+    def test_analysis_error_returns_502(self):
+        with patch(
+            "videos.views.analyze_product_image",
+            side_effect=PromptAnalysisError("provider unavailable"),
+        ):
+            response = self.client.post(
+                reverse("prompt-analysis"),
+                {"image": self.image_file()},
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.data, {"detail": "provider unavailable"})
 
 
 @override_settings(MEDIA_ROOT=MEDIA_ROOT, VIDEO_PROVIDER_FORCE_MOCK=True)

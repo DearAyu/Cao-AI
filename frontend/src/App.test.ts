@@ -3,6 +3,7 @@ import Antd from 'ant-design-vue'
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import App from './App.vue'
 import { listImageJobs } from './api/imageJobs'
+import { analyzePrompt } from './api/promptAnalysis'
 import { createVideoJob, listVideoJobs } from './api/videoJobs'
 
 vi.mock('./api/videoJobs', () => ({
@@ -17,9 +18,14 @@ vi.mock('./api/imageJobs', () => ({
   getImageJob: vi.fn(),
 }))
 
+vi.mock('./api/promptAnalysis', () => ({
+  analyzePrompt: vi.fn(),
+}))
+
 describe('Cao AI workbench', () => {
   beforeEach(() => {
     ;(createVideoJob as Mock).mockClear()
+    ;(analyzePrompt as Mock).mockReset()
     ;(listVideoJobs as Mock).mockResolvedValue({ results: [] })
     ;(listImageJobs as Mock).mockResolvedValue({ results: [] })
   })
@@ -40,14 +46,111 @@ describe('Cao AI workbench', () => {
     expect(wrapper.text()).toContain('Doubao-Seedance-2.0-fast')
   })
 
-  it('uses video model select and allows longer prompts', () => {
+  it('uses video model select and allows prompts up to 2500 characters', () => {
     const wrapper = mountApp()
 
     expect(wrapper.text()).toContain('视频模型')
     expect(wrapper.text()).toContain('Doubao-Seedance-2.0-fast')
     expect(wrapper.text()).not.toContain('视频厂商')
     expect(wrapper.text()).not.toContain('wanx2.1-i2v-turbo')
-    expect(wrapper.find('textarea').attributes('maxlength')).toBe('1500')
+    const formLabels = wrapper.findAll('.ant-form-item-label label').map((label) => label.text())
+    expect(formLabels).toContain('提示词')
+    expect(formLabels).not.toContain('影棚提示词')
+    expect(wrapper.find('textarea').attributes('maxlength')).toBe('2500')
+  })
+
+  it('clears the untouched default video prompt on first focus only', async () => {
+    const wrapper = mountApp()
+    const textarea = wrapper.find('textarea')
+
+    expect((textarea.element as HTMLTextAreaElement).value).not.toBe('')
+    await textarea.trigger('focus')
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('')
+
+    await textarea.setValue('用户输入的提示词')
+    await textarea.trigger('blur')
+    await textarea.trigger('focus')
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('用户输入的提示词')
+  })
+
+  it('preserves edited content when the first focus occurs', async () => {
+    const wrapper = mountApp()
+    const textarea = wrapper.find('textarea')
+
+    await textarea.setValue('预先编辑的提示词')
+    await textarea.trigger('focus')
+
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('预先编辑的提示词')
+  })
+
+  it('enables AI prompt analysis only after a video image is uploaded', async () => {
+    const wrapper = mountApp()
+    const analyzeButton = wrapper.get('[data-testid="analyze-prompt"]')
+
+    expect(analyzeButton.attributes('disabled')).toBeDefined()
+
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'product.png', { type: 'image/png' })],
+    })
+    await input.trigger('change')
+
+    expect(analyzeButton.attributes('disabled')).toBeUndefined()
+  })
+
+  it('analyzes the exact uploaded file and replaces the video prompt', async () => {
+    const generatedPrompt = 'AI generated product video prompt'
+    ;(analyzePrompt as Mock).mockResolvedValueOnce({ prompt: generatedPrompt })
+    const wrapper = mountApp()
+    const file = new File(['image'], 'product.png', { type: 'image/png' })
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+
+    await wrapper.get('[data-testid="analyze-prompt"]').trigger('click')
+    await flushPromises()
+
+    expect(analyzePrompt).toHaveBeenCalledWith(file)
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(generatedPrompt)
+  })
+
+  it('preserves the current video prompt when AI analysis fails', async () => {
+    ;(analyzePrompt as Mock).mockRejectedValueOnce(new Error('analysis failed'))
+    const wrapper = mountApp()
+    const existingPrompt = 'Keep this prompt unchanged'
+    await wrapper.get('textarea').setValue(existingPrompt)
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'product.png', { type: 'image/png' })],
+    })
+    await input.trigger('change')
+
+    await wrapper.get('[data-testid="analyze-prompt"]').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(existingPrompt)
+  })
+
+  it('prevents duplicate prompt analysis while a request is running', async () => {
+    let resolveAnalysis!: (value: { prompt: string }) => void
+    ;(analyzePrompt as Mock).mockReturnValueOnce(new Promise((resolve) => {
+      resolveAnalysis = resolve
+    }))
+    const wrapper = mountApp()
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'product.png', { type: 'image/png' })],
+    })
+    await input.trigger('change')
+    const analyzeButton = wrapper.get('[data-testid="analyze-prompt"]')
+
+    await Promise.all([analyzeButton.trigger('click'), analyzeButton.trigger('click')])
+
+    expect(analyzePrompt).toHaveBeenCalledTimes(1)
+    expect(analyzeButton.attributes('disabled')).toBeDefined()
+
+    resolveAnalysis({ prompt: 'Analysis complete' })
+    await flushPromises()
   })
 
   it('submits the Volcengine model id instead of display label', async () => {

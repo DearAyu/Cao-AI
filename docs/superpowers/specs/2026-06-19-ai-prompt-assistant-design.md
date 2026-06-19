@@ -38,7 +38,7 @@ Add a dedicated DRF endpoint at `POST /api/prompt-analysis/`. It accepts one mul
 
 Keep provider-specific code in a new prompt-analysis service module. In real-provider mode, it sends the image and a fixed instruction to the Volcengine Ark multimodal chat endpoint. The instruction asks for one concise Chinese video-generation prompt describing the product, visual selling points, studio lighting, camera motion, pacing, and composition, with no commentary around the prompt.
 
-The model is configured through `DOUBAO_SEED_MODEL`, defaulting to the requested `doubao-seed-2-0-pro` identifier. This remains configurable because Ark accounts may use a dated model ID or endpoint ID. The existing `VOLCENGINE_API_KEY` and `VOLCENGINE_BASE_URL` settings are reused.
+The model is configured through `DOUBAO_SEED_MODEL`, defaulting to the verified `doubao-seed-2-0-pro-260215` identifier. This remains configurable because Ark accounts may use a dated model ID or endpoint ID. The existing `VOLCENGINE_API_KEY` and `VOLCENGINE_BASE_URL` settings are reused.
 
 When `VIDEO_PROVIDER_FORCE_MOCK=true`, the endpoint returns a deterministic example prompt so the local workflow remains testable without sending the image externally.
 

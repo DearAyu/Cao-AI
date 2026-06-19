@@ -1,9 +1,28 @@
 from rest_framework import status, viewsets
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import ImageJob, VideoJob
+from .prompt_analysis import PromptAnalysisError, analyze_product_image
+from .prompt_serializers import PromptAnalysisRequestSerializer
 from .serializers import ImageJobSerializer, VideoJobSerializer
 from .services import refresh_image_job, refresh_job, submit_image_job, submit_job
+
+
+class PromptAnalysisView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        serializer = PromptAnalysisRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            prompt = analyze_product_image(serializer.validated_data["image"])
+        except PromptAnalysisError as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY
+            )
+        return Response({"prompt": prompt})
 
 
 class VideoJobViewSet(viewsets.ModelViewSet):

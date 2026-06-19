@@ -9,6 +9,7 @@ import {
   RocketOutlined,
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
+import { analyzePrompt } from './api/promptAnalysis'
 import {
   createImageJob,
   getImageJob,
@@ -23,13 +24,15 @@ import {
   type ProviderName,
   type VideoJob,
 } from './api/videoJobs'
+import VideoPromptEditor from './components/VideoPromptEditor.vue'
 
 type WorkspaceMode = 'video' | 'image' | 'materials' | 'history'
 
 const mode = ref<WorkspaceMode>('video')
 
+const DEFAULT_VIDEO_PROMPT = '用柔和的摄影棚灯光展示商品，镜头缓慢推进，突出质感和跨境电商主图卖点。'
 const videoModel = ref('doubao-seedance-2-0-fast-260128')
-const videoPrompt = ref('用柔和的摄影棚灯光展示商品，镜头缓慢推进，突出质感和跨境电商主图卖点。')
+const videoPrompt = ref(DEFAULT_VIDEO_PROMPT)
 const videoAspectRatio = ref('1:1')
 const videoDuration = ref(5)
 const videoResolution = ref('720p')
@@ -38,6 +41,7 @@ const videoImagePreview = ref('')
 const currentVideoJob = ref<VideoJob | null>(null)
 const videoJobs = ref<VideoJob[]>([])
 const isSubmittingVideo = ref(false)
+const isAnalyzingPrompt = ref(false)
 
 const imageProvider = ref<ImageProviderName>('aliyun')
 const imagePrompt = ref('保留商品主体，生成一张干净高级的跨境电商商品场景图，柔和棚拍光，白紫色科技感背景。')
@@ -52,6 +56,7 @@ const isSubmittingImage = ref(false)
 
 let videoPollTimer: number | undefined
 let imagePollTimer: number | undefined
+let hasFocusedVideoPrompt = false
 
 const videoModelOptions = [
   {
@@ -153,6 +158,26 @@ function safeResults<T>(list: { results?: T[] } | unknown): T[] {
 
 function useVideoPreset(prompt: string) {
   videoPrompt.value = prompt
+}
+
+function onVideoPromptFocus() {
+  if (hasFocusedVideoPrompt) return
+  hasFocusedVideoPrompt = true
+  if (videoPrompt.value === DEFAULT_VIDEO_PROMPT) videoPrompt.value = ''
+}
+
+async function analyzeVideoPrompt() {
+  if (!videoImageFile.value || isAnalyzingPrompt.value) return
+  isAnalyzingPrompt.value = true
+  try {
+    const result = await analyzePrompt(videoImageFile.value)
+    videoPrompt.value = result.prompt
+    message.success('AI 分析完成')
+  } catch {
+    message.error('AI 分析失败，请稍后重试')
+  } finally {
+    isAnalyzingPrompt.value = false
+  }
 }
 
 function useImagePreset(prompt: string) {
@@ -393,9 +418,13 @@ onUnmounted(() => {
                   {{ videoModelOptions.find((model) => model.value === videoModel)?.description }}
                 </p>
               </a-form-item>
-              <a-form-item label="影棚提示词">
-                <a-textarea v-model:value="videoPrompt" :rows="5" :maxLength="1500" show-count />
-              </a-form-item>
+              <VideoPromptEditor
+                v-model="videoPrompt"
+                :image-ready="Boolean(videoImageFile)"
+                :analyzing="isAnalyzingPrompt"
+                @focus="onVideoPromptFocus"
+                @analyze="analyzeVideoPrompt"
+              />
               <div class="prompt-chips">
                 <button v-for="prompt in videoPromptPresets" :key="prompt" type="button" @click="useVideoPreset(prompt)">
                   {{ prompt }}
