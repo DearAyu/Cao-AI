@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import Antd from 'ant-design-vue'
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import App from './App.vue'
-import { listImageJobs } from './api/imageJobs'
+import { createImageJob, listImageJobs } from './api/imageJobs'
 import { analyzePrompt } from './api/promptAnalysis'
 import { createVideoJob, listVideoJobs } from './api/videoJobs'
 
@@ -25,6 +25,7 @@ vi.mock('./api/promptAnalysis', () => ({
 describe('Cao AI workbench', () => {
   beforeEach(() => {
     ;(createVideoJob as Mock).mockClear()
+    ;(createImageJob as Mock).mockReset()
     ;(analyzePrompt as Mock).mockReset()
     ;(listVideoJobs as Mock).mockResolvedValue({ results: [] })
     ;(listImageJobs as Mock).mockResolvedValue({ results: [] })
@@ -44,6 +45,18 @@ describe('Cao AI workbench', () => {
     expect(wrapper.text()).toContain('视频生成')
     expect(wrapper.text()).toContain('图片生成')
     expect(wrapper.text()).toContain('Doubao-Seedance-2.0-fast')
+  })
+
+  it('does not render prompt preset cards in either workspace', async () => {
+    const wrapper = mountApp()
+
+    expect(wrapper.find('.prompt-chips').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('柔和棚拍光，镜头缓慢推进')
+
+    await wrapper.findAll('.nav-item')[1].trigger('click')
+
+    expect(wrapper.find('.prompt-chips').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('保留商品主体，生成高级棚拍场景')
   })
 
   it('uses video model select and allows prompts up to 2500 characters', () => {
@@ -265,6 +278,16 @@ describe('Cao AI workbench', () => {
     expect(wrapper.text()).toContain('影棚预览')
   })
 
+  it('does not render legacy recent task panels in either generation workspace', async () => {
+    const wrapper = mountApp()
+
+    expect(wrapper.text()).not.toContain('最近视频任务')
+
+    await wrapper.findAll('.nav-item')[1].trigger('click')
+
+    expect(wrapper.text()).not.toContain('最近图片任务')
+  })
+
   it('keeps video generate disabled until an image is selected', () => {
     const wrapper = mountApp()
     const button = wrapper.find('[data-testid="generate-button"]')
@@ -279,6 +302,173 @@ describe('Cao AI workbench', () => {
     expect(wrapper.text()).toContain('阿里 wan2.7-image')
     expect(wrapper.text()).toContain('字节 Seedream 4.5')
     expect(wrapper.find('[data-testid="generate-image-button"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('replaces the image preview with a generation progress card after submission', async () => {
+    ;(createImageJob as Mock).mockResolvedValueOnce({
+      id: 31,
+      provider: 'aliyun',
+      provider_label: '阿里 wan2.7-image',
+      status: 'submitted',
+      prompt: '商品场景图',
+      aspect_ratio: '1:1',
+      size: '2K',
+      count: 1,
+      source_image_url: '/media/source.png',
+      remote_task_id: 'image-task-31',
+      result_images: [],
+      result_image_urls: [],
+      error_message: '',
+      created_at: '2026-06-19T13:03:36Z',
+      updated_at: '2026-06-19T13:03:36Z',
+    })
+    const wrapper = mountApp()
+    await wrapper.findAll('.nav-item')[1].trigger('click')
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'product.png', { type: 'image/png' })],
+    })
+    await input.trigger('change')
+
+    await wrapper.get('[data-testid="generate-image-button"]').trigger('click')
+    await flushPromises()
+
+    const stage = wrapper.get('[data-testid="image-generation-stage"]')
+    expect(stage.text()).toContain('阿里 wan2.7-image')
+    expect(stage.text()).toContain('2K')
+    expect(stage.text()).toContain('image-task-31')
+    expect(stage.text()).toContain('AI 生成中… 8%')
+    expect(wrapper.find('.image-monitor').exists()).toBe(false)
+  })
+
+  it('shows a complete task detail sheet with every generated image', async () => {
+    ;(createImageJob as Mock).mockResolvedValueOnce({
+      id: 32,
+      provider: 'seedream',
+      provider_label: '字节 Seedream 4.5',
+      status: 'succeeded',
+      prompt: '保留商品主体，生成法式复古商品场景图',
+      aspect_ratio: '1:1',
+      size: '2K',
+      count: 2,
+      source_image_url: '/media/source-32.png',
+      remote_task_id: 'image-task-32',
+      result_images: ['result-1.png', 'result-2.png'],
+      result_image_urls: ['/media/result-1.png', '/media/result-2.png'],
+      error_message: '',
+      created_at: '2026-06-19T13:13:49Z',
+      updated_at: '2026-06-19T13:13:59Z',
+    })
+    const wrapper = mountApp()
+    await wrapper.findAll('.nav-item')[1].trigger('click')
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'product.png', { type: 'image/png' })],
+    })
+    await input.trigger('change')
+
+    await wrapper.get('[data-testid="generate-image-button"]').trigger('click')
+    await flushPromises()
+
+    const detail = wrapper.get('[data-testid="image-result-detail"]')
+    expect(detail.text()).toContain('字节 Seedream 4.5')
+    expect(detail.text()).toContain('2K')
+    expect(detail.text()).toContain('1:1')
+    expect(detail.text()).toContain('image-task-32')
+    expect(detail.text()).toContain('保留商品主体，生成法式复古商品场景图')
+    expect(detail.findAll('.result-detail-card')).toHaveLength(2)
+    expect(detail.find('[data-testid="download-all-images"]').exists()).toBe(true)
+    expect(detail.find('[data-testid="reuse-image-settings"]').exists()).toBe(true)
+    expect(wrapper.find('.image-monitor').exists()).toBe(false)
+  })
+
+  it('downloads a generated image through a browser blob URL', async () => {
+    ;(createImageJob as Mock).mockResolvedValueOnce({
+      id: 33,
+      provider: 'aliyun',
+      provider_label: '阿里 wan2.7-image',
+      status: 'succeeded',
+      prompt: '浏览器下载测试',
+      aspect_ratio: '1:1',
+      size: '2K',
+      count: 1,
+      source_image_url: '/media/source-33.png',
+      remote_task_id: 'image-task-33',
+      result_images: ['result-33.png'],
+      result_image_urls: ['/media/result-33.png'],
+      error_message: '',
+      created_at: '2026-06-19T13:13:49Z',
+      updated_at: '2026-06-19T13:13:59Z',
+    })
+    const imageBlob = new Blob(['image'], { type: 'image/png' })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: vi.fn().mockResolvedValue(imageBlob) })
+    vi.stubGlobal('fetch', fetchMock)
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL')
+      .mockReturnValueOnce('blob:preview')
+      .mockReturnValue('blob:download')
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const wrapper = mountApp()
+    await wrapper.findAll('.nav-item')[1].trigger('click')
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'product.png', { type: 'image/png' })],
+    })
+    await input.trigger('change')
+    await wrapper.get('[data-testid="generate-image-button"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="download-image-0"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith('/media/result-33.png')
+    expect(createObjectUrl).toHaveBeenLastCalledWith(imageBlob)
+    expect(anchorClick).toHaveBeenCalledTimes(1)
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:download')
+
+    wrapper.unmount()
+    anchorClick.mockRestore()
+    revokeObjectUrl.mockRestore()
+    createObjectUrl.mockRestore()
+    vi.unstubAllGlobals()
+  })
+
+  it('shows detailed records for only the 10 most recent image jobs', async () => {
+    const jobs = Array.from({ length: 12 }, (_, index) => {
+      const id = 112 - index
+      const status = index === 1 ? 'processing' : index === 2 ? 'failed' : 'succeeded'
+      return {
+        id,
+        provider: 'aliyun',
+        provider_label: '阿里 wan2.7-image',
+        status,
+        prompt: `最近任务提示词 ${id}`,
+        aspect_ratio: '1:1',
+        size: '2K',
+        count: 1,
+        source_image_url: `/media/source-${id}.png`,
+        remote_task_id: `recent-image-task-${id}`,
+        result_images: status === 'succeeded' ? [`result-${id}.png`] : [],
+        result_image_urls: status === 'succeeded' ? [`/media/result-${id}.png`] : [],
+        error_message: status === 'failed' ? '供应商生成失败' : '',
+        created_at: `2026-06-19T12:${String(59 - index).padStart(2, '0')}:00Z`,
+        updated_at: `2026-06-19T12:${String(59 - index).padStart(2, '0')}:00Z`,
+      }
+    })
+    ;(listImageJobs as Mock).mockResolvedValueOnce({ results: jobs })
+    const wrapper = mountApp()
+    await flushPromises()
+
+    await wrapper.findAll('.nav-item')[1].trigger('click')
+
+    expect(wrapper.text()).toContain('生成结果')
+    expect(wrapper.findAll('.result-record')).toHaveLength(10)
+    expect(wrapper.text()).toContain('recent-image-task-112')
+    expect(wrapper.text()).toContain('recent-image-task-103')
+    expect(wrapper.text()).not.toContain('recent-image-task-102')
+    expect(wrapper.text()).toContain('供应商生成失败')
+    expect(wrapper.find('[data-testid="image-generation-stage"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('最近图片任务')
   })
 
   it('keeps navigation usable when image jobs response is malformed', async () => {

@@ -2,7 +2,11 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   CloudUploadOutlined,
+  CopyOutlined,
+  DownloadOutlined,
+  EyeOutlined,
   FileImageOutlined,
+  FormOutlined,
   HistoryOutlined,
   PlayCircleOutlined,
   ProjectOutlined,
@@ -53,9 +57,12 @@ const imagePreview = ref('')
 const currentImageJob = ref<ImageJob | null>(null)
 const imageJobs = ref<ImageJob[]>([])
 const isSubmittingImage = ref(false)
+const imageEstimatedProgress = ref(8)
+const imageSubmissionStartedAt = ref('')
 
 let videoPollTimer: number | undefined
 let imagePollTimer: number | undefined
+let imageProgressTimer: number | undefined
 let hasFocusedVideoPrompt = false
 
 const videoModelOptions = [
@@ -99,18 +106,6 @@ const resolutionOptions = [
   { label: '1080p', value: '1080p' },
 ]
 
-const videoPromptPresets = [
-  '柔和棚拍光，镜头缓慢推进，突出商品材质和主图卖点。',
-  '干净白底到高级场景的转场，适合跨境电商详情页首屏。',
-  '模特手部轻触商品，镜头环绕展示尺寸、质感和包装细节。',
-]
-
-const imagePromptPresets = [
-  '保留商品主体，生成高级棚拍场景，干净背景，柔和反射。',
-  '生成跨境电商主图，突出产品轮廓，背景有轻微空间层次。',
-  '为商品创建节日营销场景，保持主体真实，画面明亮精致。',
-]
-
 const statusText: Record<string, string> = {
   pending: '等待提交',
   submitted: '已提交',
@@ -128,10 +123,16 @@ const activeResolutionOptions = computed(() => {
 const activeVideo = computed(() => currentVideoJob.value?.result_video_url || '')
 const activeVideoImage = computed(() => videoImagePreview.value || currentVideoJob.value?.source_image_url || '')
 const activeImagePreview = computed(() => imagePreview.value || currentImageJob.value?.source_image_url || '')
-const activeGeneratedImages = computed(() => currentImageJob.value?.result_image_urls ?? [])
+const recentImageJobs = computed(() => imageJobs.value.slice(0, 10))
 const totalJobs = computed(() => videoJobs.value.length + imageJobs.value.length)
 const videoStatusLabel = computed(() => (currentVideoJob.value ? statusText[currentVideoJob.value.status] : '待上传'))
 const imageStatusLabel = computed(() => (currentImageJob.value ? statusText[currentImageJob.value.status] : '待上传'))
+const imageGenerationProviderLabel = computed(() => {
+  if (currentImageJob.value?.provider_label) return currentImageJob.value.provider_label
+  return imageProviderOptions.find((option) => option.value === imageProvider.value)?.label ?? imageProvider.value
+})
+const imageGenerationTaskId = computed(() => currentImageJob.value?.remote_task_id || currentImageJob.value?.id || '创建中')
+const imageGenerationTime = computed(() => formatDateTime(currentImageJob.value?.created_at || imageSubmissionStartedAt.value))
 const historyItems = computed(() =>
   [
     ...videoJobs.value.map((job) => ({ kind: '视频', id: job.id, provider: job.provider_label, status: job.status, created_at: job.created_at })),
@@ -141,6 +142,19 @@ const historyItems = computed(() =>
 
 function providerForVideoModel(modelName: string): ProviderName {
   return modelName.startsWith('wan') ? 'aliyun' : 'volcengine'
+}
+
+function formatDateTime(value: string) {
+  if (!value) return '正在创建任务'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(new Date(value))
 }
 
 watch(videoModel, () => {
@@ -154,10 +168,6 @@ function safeResults<T>(list: { results?: T[] } | unknown): T[] {
     return (list as { results: T[] }).results
   }
   return []
-}
-
-function useVideoPreset(prompt: string) {
-  videoPrompt.value = prompt
 }
 
 function onVideoPromptFocus() {
@@ -178,10 +188,6 @@ async function analyzeVideoPrompt() {
   } finally {
     isAnalyzingPrompt.value = false
   }
-}
-
-function useImagePreset(prompt: string) {
-  imagePrompt.value = prompt
 }
 
 function statusColor(status: string) {
@@ -245,7 +251,9 @@ async function submitVideoJob() {
 
 async function submitImageJob() {
   if (!imageFile.value) return
+  currentImageJob.value = null
   isSubmittingImage.value = true
+  startImageProgress()
   try {
     currentImageJob.value = await createImageJob({
       provider: imageProvider.value,
@@ -259,8 +267,11 @@ async function submitImageJob() {
     message.success('图片任务已提交')
     if (currentImageJob.value.status === 'submitted' || currentImageJob.value.status === 'processing') {
       startImagePolling(currentImageJob.value.id)
+    } else {
+      finishImageProgress(currentImageJob.value.status === 'succeeded')
     }
   } catch {
+    stopImageProgress()
     message.error('图片提交失败，请检查后端服务和厂商配置')
   } finally {
     isSubmittingImage.value = false
@@ -283,8 +294,83 @@ function startImagePolling(id: number) {
     const job = await getImageJob(id)
     currentImageJob.value = job
     imageJobs.value = [job, ...imageJobs.value.filter((item) => item.id !== job.id)]
-    if (job.status === 'succeeded' || job.status === 'failed') stopImagePolling()
+    if (job.status === 'succeeded' || job.status === 'failed') {
+      stopImagePolling()
+      finishImageProgress(job.status === 'succeeded')
+    }
   }, 3000)
+}
+
+function startImageProgress() {
+  stopImageProgress()
+  imageEstimatedProgress.value = 8
+  imageSubmissionStartedAt.value = new Date().toISOString()
+  imageProgressTimer = window.setInterval(() => {
+    const remaining = 95 - imageEstimatedProgress.value
+    imageEstimatedProgress.value = Math.min(95, imageEstimatedProgress.value + Math.max(1, Math.ceil(remaining / 12)))
+  }, 1500)
+}
+
+function stopImageProgress() {
+  if (imageProgressTimer) window.clearInterval(imageProgressTimer)
+  imageProgressTimer = undefined
+}
+
+function finishImageProgress(succeeded: boolean) {
+  stopImageProgress()
+  if (succeeded) imageEstimatedProgress.value = 100
+}
+
+function imageResultFileName(job: ImageJob, index: number) {
+  return `cao-ai-task-${job.id}-result-${index + 1}.png`
+}
+
+async function downloadImage(job: ImageJob, url: string, index: number) {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`Download failed: ${response.status}`)
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = imageResultFileName(job, index)
+    anchor.rel = 'noopener'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(objectUrl)
+  } catch {
+    message.error(`结果 ${index + 1} 下载失败，请稍后重试`)
+  }
+}
+
+async function downloadAllImages(job: ImageJob) {
+  for (const [index, url] of job.result_image_urls.entries()) {
+    await downloadImage(job, url, index)
+  }
+}
+
+async function copyImageTaskId(job: ImageJob) {
+  const taskId = String(job.remote_task_id || job.id)
+  try {
+    await navigator.clipboard.writeText(taskId)
+    message.success('任务 ID 已复制')
+  } catch {
+    message.error('复制失败，请手动复制任务 ID')
+  }
+}
+
+function reuseImageSettings(job: ImageJob) {
+  imageProvider.value = job.provider
+  imagePrompt.value = job.prompt
+  imageAspectRatio.value = job.aspect_ratio
+  imageSize.value = job.size
+  imageCount.value = job.count
+  message.success('参数已载入，可调整后再次生成')
+}
+
+function isImageJobGenerating(job: ImageJob) {
+  return ['pending', 'submitted', 'processing'].includes(job.status)
 }
 
 function stopVideoPolling() {
@@ -297,20 +383,11 @@ function stopImagePolling() {
   imagePollTimer = undefined
 }
 
-function selectVideoJob(job: VideoJob) {
-  currentVideoJob.value = job
-  if (job.status === 'submitted' || job.status === 'processing') startVideoPolling(job.id)
-}
-
-function selectImageJob(job: ImageJob) {
-  currentImageJob.value = job
-  if (job.status === 'submitted' || job.status === 'processing') startImagePolling(job.id)
-}
-
 onMounted(loadJobs)
 onUnmounted(() => {
   stopVideoPolling()
   stopImagePolling()
+  stopImageProgress()
   if (videoImagePreview.value) URL.revokeObjectURL(videoImagePreview.value)
   if (imagePreview.value) URL.revokeObjectURL(imagePreview.value)
 })
@@ -425,11 +502,6 @@ onUnmounted(() => {
                 @focus="onVideoPromptFocus"
                 @analyze="analyzeVideoPrompt"
               />
-              <div class="prompt-chips">
-                <button v-for="prompt in videoPromptPresets" :key="prompt" type="button" @click="useVideoPreset(prompt)">
-                  {{ prompt }}
-                </button>
-              </div>
               <div class="form-row">
                 <a-form-item label="画面比例">
                   <a-select v-model:value="videoAspectRatio" :options="aspectRatioOptions" />
@@ -473,18 +545,6 @@ onUnmounted(() => {
           </section>
         </div>
 
-        <section class="panel jobs">
-          <div class="panel-title"><span>最近视频任务</span><span class="muted">{{ videoJobs.length }} 条</span></div>
-          <a-empty v-if="!videoJobs.length" description="暂无视频任务，上传商品图后开始第一条生成" />
-          <div v-else class="job-list">
-            <button v-for="job in videoJobs" :key="job.id" class="job-row" @click="selectVideoJob(job)">
-              <span>#{{ job.id }}</span>
-              <strong>{{ job.provider_label }}</strong>
-              <span>{{ job.aspect_ratio }} / {{ job.duration }} 秒 / {{ job.resolution }}</span>
-              <a-tag :color="statusColor(job.status)">{{ statusText[job.status] }}</a-tag>
-            </button>
-          </div>
-        </section>
       </section>
 
       <section class="workspace" v-else-if="mode === 'image'">
@@ -532,11 +592,6 @@ onUnmounted(() => {
               <a-form-item label="场景提示词">
                 <a-textarea v-model:value="imagePrompt" :rows="5" :maxLength="1500" show-count />
               </a-form-item>
-              <div class="prompt-chips">
-                <button v-for="prompt in imagePromptPresets" :key="prompt" type="button" @click="useImagePreset(prompt)">
-                  {{ prompt }}
-                </button>
-              </div>
               <div class="form-row">
                 <a-form-item label="画面比例">
                   <a-select v-model:value="imageAspectRatio" :options="aspectRatioOptions" />
@@ -555,45 +610,136 @@ onUnmounted(() => {
             </a-button>
           </section>
 
-          <section class="panel preview">
-            <div class="panel-title">
-              <span>影棚预览</span>
-              <a-tag v-if="currentImageJob" :color="statusColor(currentImageJob.status)">
-                {{ statusText[currentImageJob.status] }}
-              </a-tag>
-              <a-tag v-else>待上传</a-tag>
+          <section class="panel preview recent-results-panel">
+            <div class="panel-title recent-results-title">
+              <span>生成结果</span>
+              <small>最近 {{ recentImageJobs.length }} 条</small>
             </div>
-            <div class="monitor image-monitor">
-              <div v-if="activeGeneratedImages.length" class="image-results">
-                <img v-for="url in activeGeneratedImages" :key="url" :src="url" alt="生成结果图" />
+
+            <div v-if="isSubmittingImage" data-testid="image-generation-stage" class="image-generation-stage result-record">
+              <div class="generation-summary">
+                <img v-if="activeImagePreview" :src="activeImagePreview" alt="生成任务参考图" />
+                <div v-else class="generation-thumb-placeholder"><FileImageOutlined /></div>
+                <div class="generation-details">
+                  <div class="generation-specs">
+                    <span>模型：{{ imageGenerationProviderLabel }}</span>
+                    <i></i>
+                    <span>分辨率：{{ currentImageJob?.size || imageSize }}</span>
+                    <i></i>
+                    <span>模型品质：标准</span>
+                    <i></i>
+                    <span>生图类型：商品场景图</span>
+                  </div>
+                  <div class="generation-subline">{{ imageGenerationTime }} / 任务 ID：{{ imageGenerationTaskId }}</div>
+                  <span class="generation-badge">商品场景图</span>
+                </div>
               </div>
-              <img v-else-if="activeImagePreview" :src="activeImagePreview" alt="当前参考图" />
-              <div v-else class="empty-monitor">
-                <span class="scanline"></span>
-                <strong>等待参考图进入影棚</strong>
-                <p>上传参考图后，这里会显示原图和生成结果。</p>
+              <div class="generation-canvas">
+                <div class="generation-orbit" aria-hidden="true"><FileImageOutlined /></div>
+                <div class="generation-progress-copy">
+                  <strong>AI 生成中… {{ imageEstimatedProgress }}%</strong>
+                  <span>正在构建光线、背景与商品细节</span>
+                </div>
+                <div class="generation-progress-track" role="progressbar" aria-label="图片预计生成进度" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="imageEstimatedProgress">
+                  <span :style="{ width: `${imageEstimatedProgress}%` }"></span>
+                </div>
               </div>
             </div>
-            <a-alert v-if="currentImageJob?.status === 'failed'" type="error" show-icon :message="currentImageJob.error_message || '生成失败'" />
-            <div v-else-if="currentImageJob && currentImageJob.status !== 'succeeded'" class="progress-copy">
-              <a-spin size="small" />
-              <span>任务 {{ currentImageJob.remote_task_id || currentImageJob.id }} 正在处理，每 3 秒自动刷新。</span>
+
+            <a-empty v-if="!isSubmittingImage && !recentImageJobs.length" description="暂无生成结果，上传参考图后开始第一张创作" />
+
+            <div v-if="recentImageJobs.length" class="result-record-list">
+              <article
+                v-for="job in recentImageJobs"
+                :key="job.id"
+                class="result-record image-result-detail"
+                :class="`result-record-${job.status}`"
+                :data-testid="job.status === 'succeeded' ? 'image-result-detail' : isImageJobGenerating(job) ? 'image-generation-stage' : undefined"
+              >
+              <header class="result-detail-header">
+                <div class="result-detail-identity">
+                  <img v-if="job.source_image_url" :src="job.source_image_url" alt="任务参考图" />
+                  <div v-else class="generation-thumb-placeholder"><FileImageOutlined /></div>
+                  <div class="result-detail-heading">
+                    <div class="generation-specs">
+                      <span>模型：{{ job.provider_label }}</span>
+                      <i></i>
+                      <span>分辨率：{{ job.size }}</span>
+                      <i></i>
+                      <span>画面比例：{{ job.aspect_ratio }}</span>
+                      <i></i>
+                      <span>生成数量：{{ job.count }} 张</span>
+                    </div>
+                    <div class="generation-subline">{{ formatDateTime(job.created_at) }} / 任务 ID：{{ job.remote_task_id || job.id }}</div>
+                    <span class="generation-badge" :class="`generation-badge-${job.status}`">商品场景图 · {{ statusText[job.status] }}</span>
+                  </div>
+                </div>
+                <div class="result-detail-actions">
+                  <a-button v-if="job.status === 'succeeded' && job.result_image_urls.length" data-testid="download-all-images" @click="downloadAllImages(job)"><DownloadOutlined />下载全部</a-button>
+                  <a-button @click="copyImageTaskId(job)"><CopyOutlined />复制任务 ID</a-button>
+                  <a-button data-testid="reuse-image-settings" @click="reuseImageSettings(job)"><FormOutlined />复用参数</a-button>
+                </div>
+              </header>
+
+              <div class="result-detail-context">
+                <section class="result-prompt-card">
+                  <span>生成提示词</span>
+                  <p>{{ job.prompt || '未填写提示词' }}</p>
+                </section>
+                <section class="result-source-card">
+                  <div>
+                    <span>原始参考图</span>
+                    <small>用于本次图生图任务</small>
+                  </div>
+                  <a v-if="job.source_image_url" :href="job.source_image_url" target="_blank" rel="noopener">
+                    <img :src="job.source_image_url" alt="原始参考图" />
+                  </a>
+                </section>
+              </div>
+
+              <section v-if="job.status === 'succeeded' && job.result_image_urls.length" class="result-detail-gallery">
+                <div class="result-gallery-heading">
+                  <div><span>生成结果</span><small>共 {{ job.result_image_urls.length }} 张</small></div>
+                  <a-tag color="success">生成完成</a-tag>
+                </div>
+                <div class="result-detail-grid">
+                  <div v-for="(url, index) in job.result_image_urls" :key="url" class="result-detail-card">
+                    <div class="result-card-title">
+                      <span>结果 {{ String(index + 1).padStart(2, '0') }}</span>
+                      <div>
+                        <a :href="url" target="_blank" rel="noopener" aria-label="查看大图"><EyeOutlined /></a>
+                        <button :data-testid="`download-image-${index}`" type="button" aria-label="下载图片" @click="downloadImage(job, url, index)"><DownloadOutlined /></button>
+                      </div>
+                    </div>
+                    <a class="result-image-link" :href="url" target="_blank" rel="noopener">
+                      <img :src="url" :alt="`生成结果 ${index + 1}`" />
+                    </a>
+                  </div>
+                </div>
+              </section>
+
+              <section v-else-if="isImageJobGenerating(job)" class="record-generation-progress">
+                <div class="generation-orbit" aria-hidden="true"><FileImageOutlined /></div>
+                <div class="generation-progress-copy">
+                  <strong>AI 生成中… {{ currentImageJob?.id === job.id ? imageEstimatedProgress : 8 }}%</strong>
+                  <span>任务正在处理中，完成后会自动展示全部结果</span>
+                </div>
+                <div class="generation-progress-track" role="progressbar" aria-label="图片预计生成进度" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="currentImageJob?.id === job.id ? imageEstimatedProgress : 8">
+                  <span :style="{ width: `${currentImageJob?.id === job.id ? imageEstimatedProgress : 8}%` }"></span>
+                </div>
+              </section>
+
+              <section v-else-if="job.status === 'failed'" class="record-failure-detail">
+                <a-alert type="error" show-icon :message="job.error_message || '生成失败，请复用参数后重试'" />
+              </section>
+
+              <section v-else class="record-failure-detail">
+                <a-alert type="warning" show-icon message="任务已完成，但没有返回可展示的图片" />
+              </section>
+              </article>
             </div>
           </section>
         </div>
-
-        <section class="panel jobs">
-          <div class="panel-title"><span>最近图片任务</span><span class="muted">{{ imageJobs.length }} 条</span></div>
-          <a-empty v-if="!imageJobs.length" description="暂无图片任务，上传参考图后开始第一张生成" />
-          <div v-else class="job-list">
-            <button v-for="job in imageJobs" :key="job.id" class="job-row" @click="selectImageJob(job)">
-              <span>#{{ job.id }}</span>
-              <strong>{{ job.provider_label }}</strong>
-              <span>{{ job.size }} / {{ job.count }} 张</span>
-              <a-tag :color="statusColor(job.status)">{{ statusText[job.status] }}</a-tag>
-            </button>
-          </div>
-        </section>
       </section>
 
       <section class="workspace" v-else-if="mode === 'history'">
