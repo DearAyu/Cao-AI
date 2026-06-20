@@ -17,14 +17,20 @@ class ProviderError(RuntimeError):
 
 
 def request_with_retries(method: str, url: str, provider_name: str, **kwargs) -> requests.Response:
+    ignore_system_proxy = kwargs.pop("ignore_system_proxy", False)
     retryable_errors = (
         request_exceptions.ConnectionError,
         request_exceptions.SSLError,
         request_exceptions.Timeout,
+        request_exceptions.ProxyError,
     )
     last_error: Exception | None = None
     for attempt in range(1, 4):
         try:
+            if ignore_system_proxy:
+                session = requests.Session()
+                session.trust_env = False
+                return getattr(session, method)(url, **kwargs)
             return getattr(requests, method)(url, **kwargs)
         except retryable_errors as exc:
             last_error = exc

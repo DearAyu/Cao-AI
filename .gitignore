@@ -1,5 +1,6 @@
 .env
 .venv/
+.venv-runtime/
 .wheels/
 backend/db.sqlite3
 backend/media/
@@ -8,3 +9,5 @@ frontend/node_modules/
 frontend/dist/
 .codex-logs/
 .superpowers/
+backend-server*.log
+frontend-server*.log

@@ -5,7 +5,8 @@ from rest_framework.views import APIView
 
 from .models import ImageJob, VideoJob
 from .prompt_analysis import PromptAnalysisError, analyze_product_image
-from .prompt_serializers import PromptAnalysisRequestSerializer
+from .prompt_assistant import PromptAssistantError, generate_video_prompt, revise_video_prompt
+from .prompt_serializers import PromptAnalysisRequestSerializer, PromptAssistantRequestSerializer
 from .serializers import ImageJobSerializer, VideoJobSerializer
 from .services import refresh_image_job, refresh_job, submit_image_job, submit_job
 
@@ -23,6 +24,30 @@ class PromptAnalysisView(APIView):
                 {"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY
             )
         return Response({"prompt": prompt})
+
+
+class PromptAssistantView(APIView):
+    def post(self, request):
+        serializer = PromptAssistantRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            if data["action"] == "revise":
+                result = revise_video_prompt(
+                    product_title=data.get("product_title", ""),
+                    product_detail=data.get("product_detail", ""),
+                    selling_points=data.get("selling_points", []),
+                    current_prompt=data["current_prompt"],
+                    revision_instruction=data["revision_instruction"],
+                )
+            else:
+                result = generate_video_prompt(
+                    product_title=data["product_title"],
+                    product_detail=data["product_detail"],
+                )
+        except PromptAssistantError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(result)
 
 
 class VideoJobViewSet(viewsets.ModelViewSet):

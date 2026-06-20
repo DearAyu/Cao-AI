@@ -15,6 +15,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from cao_ai.database import build_database_config
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR.parent / ".env")
@@ -81,10 +83,7 @@ WSGI_APPLICATION = 'cao_ai.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': build_database_config(BASE_DIR, os.environ)
 }
 
 
@@ -152,6 +151,11 @@ ALIYUN_BASE_URL = os.getenv("ALIYUN_BASE_URL", "https://dashscope.aliyuncs.com/a
 ALIYUN_MODEL = os.getenv("ALIYUN_MODEL", "wan2.7-i2v")
 ALIYUN_IMAGE_MODEL = os.getenv("ALIYUN_IMAGE_MODEL", "wan2.7-image")
 SEEDREAM_IMAGE_MODEL = os.getenv("SEEDREAM_IMAGE_MODEL", "doubao-seedream-4-5-251128")
+
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
+PROMPT_RULES_PATH = os.getenv("PROMPT_RULES_PATH", str(BASE_DIR.parent / "预设提示词规则.txt"))
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

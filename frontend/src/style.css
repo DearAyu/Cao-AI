@@ -415,6 +415,10 @@ h1 {
   resize: vertical;
 }
 
+.video-prompt-editor__field .video-prompt-editor__textarea--muted {
+  color: #8c8c8c;
+}
+
 .video-prompt-editor__field .ant-input:focus {
   box-shadow: none;
 }
@@ -541,6 +545,55 @@ h1 {
 
 .image-monitor {
   align-items: stretch;
+}
+
+.prompt-assistant {
+  display: grid;
+  gap: 16px;
+}
+
+.prompt-assistant__form {
+  display: grid;
+  gap: 8px;
+}
+
+.prompt-assistant__section {
+  display: grid;
+  gap: 10px;
+}
+
+.prompt-assistant__section h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.prompt-assistant__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.prompt-assistant__chips span {
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: var(--violet-dark);
+  background: rgba(111, 83, 232, 0.1);
+}
+
+.prompt-assistant__title-row,
+.prompt-assistant__revision {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.prompt-assistant__title-row {
+  justify-content: space-between;
+}
+
+.prompt-assistant__revision .ant-input {
+  flex: 1;
 }
 
 .image-generation-stage {

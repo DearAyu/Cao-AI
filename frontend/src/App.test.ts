@@ -20,6 +20,7 @@ vi.mock('./api/imageJobs', () => ({
 
 vi.mock('./api/promptAnalysis', () => ({
   analyzePrompt: vi.fn(),
+  runPromptAssistant: vi.fn(),
 }))
 
 describe('Cao AI workbench', () => {
@@ -72,11 +73,15 @@ describe('Cao AI workbench', () => {
     expect(wrapper.find('textarea').attributes('maxlength')).toBe('2500')
   })
 
-  it('clears the untouched default video prompt on first focus only', async () => {
+  it('clears the default video prompt on focus and restores it after empty blur', async () => {
     const wrapper = mountApp()
     const textarea = wrapper.find('textarea')
 
     expect((textarea.element as HTMLTextAreaElement).value).not.toBe('')
+    await textarea.trigger('focus')
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('')
+    await textarea.trigger('blur')
+    expect((textarea.element as HTMLTextAreaElement).value).toContain('输入视频中想要的主体动作场景')
     await textarea.trigger('focus')
     expect((textarea.element as HTMLTextAreaElement).value).toBe('')
 

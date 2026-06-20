@@ -17,6 +17,12 @@ from .prompt_analysis import (
     extract_prompt,
     image_data_url,
 )
+from .prompt_assistant import (
+    PromptAssistantError,
+    extract_assistant_result,
+    generate_video_prompt,
+    load_prompt_rules,
+)
 from .providers import AliWanxiangProvider, VolcengineSeedanceProvider
 
 
@@ -423,6 +429,96 @@ class PromptAnalysisApiTests(TestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data, {"detail": "provider unavailable"})
+
+
+@override_settings(
+    VIDEO_PROVIDER_FORCE_MOCK=False,
+    DEEPSEEK_API_KEY="deepseek-key",
+    DEEPSEEK_BASE_URL="https://deepseek.example",
+    DEEPSEEK_MODEL="deepseek-v4-pro",
+    PROMPT_RULES_PATH=str(Path(__file__).resolve().parents[2] / "预设提示词规则.txt"),
+)
+class PromptAssistantTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_loads_prompt_rules_file(self):
+        rules = load_prompt_rules()
+
+        self.assertIn("产品原样锁定", rules)
+        self.assertIn("Link en bio", rules)
+
+    def test_generate_video_prompt_sends_product_details_and_rules_to_deepseek(self):
+        class Response:
+            def json(self):
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": '{"selling_points":["轻薄","百搭"],"prompt":"9:16 4K. Keep product identical."}'
+                            }
+                        }
+                    ]
+                }
+
+        with patch("videos.prompt_assistant.request_with_retries", return_value=Response()) as request:
+            with patch("videos.prompt_assistant.raise_for_bad_response"):
+                result = generate_video_prompt(
+                    product_title="法式针织开衫",
+                    product_detail="柔软亲肤，适合通勤和约会。",
+                )
+
+        self.assertEqual(result["selling_points"], ["轻薄", "百搭"])
+        self.assertIn("Keep product identical", result["prompt"])
+        payload = request.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], "deepseek-v4-pro")
+        user_text = payload["messages"][1]["content"]
+        self.assertIn("法式针织开衫", user_text)
+        self.assertIn("柔软亲肤", user_text)
+        self.assertIn("产品原样锁定", user_text)
+
+    def test_extract_assistant_result_rejects_invalid_json(self):
+        with self.assertRaises(PromptAssistantError):
+            extract_assistant_result({"choices": [{"message": {"content": "not json"}}]})
+
+    def test_prompt_assistant_api_generates_prompt(self):
+        with patch(
+            "videos.views.generate_video_prompt",
+            return_value={"selling_points": ["防滑"], "prompt": "Final video prompt"},
+        ):
+            response = self.client.post(
+                reverse("prompt-assistant"),
+                {
+                    "product_title": "防滑拖鞋",
+                    "product_detail": "柔软鞋底，浴室可用。",
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["selling_points"], ["防滑"])
+        self.assertEqual(response.data["prompt"], "Final video prompt")
+
+    def test_prompt_assistant_api_revises_prompt(self):
+        with patch(
+            "videos.views.revise_video_prompt",
+            return_value={"selling_points": ["防滑"], "prompt": "Revised prompt"},
+        ):
+            response = self.client.post(
+                reverse("prompt-assistant"),
+                {
+                    "action": "revise",
+                    "product_title": "防滑拖鞋",
+                    "product_detail": "柔软鞋底，浴室可用。",
+                    "selling_points": ["防滑"],
+                    "current_prompt": "Old prompt",
+                    "revision_instruction": "加强浴室场景",
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["prompt"], "Revised prompt")
 
 
 @override_settings(MEDIA_ROOT=MEDIA_ROOT, VIDEO_PROVIDER_FORCE_MOCK=True)

@@ -34,9 +34,10 @@ type WorkspaceMode = 'video' | 'image' | 'materials' | 'history'
 
 const mode = ref<WorkspaceMode>('video')
 
-const DEFAULT_VIDEO_PROMPT = '用柔和的摄影棚灯光展示商品，镜头缓慢推进，突出质感和跨境电商主图卖点。'
+const DEFAULT_VIDEO_PROMPT = '输入视频中想要的主体动作场景，使用 英文更准确。例如， "一个美女在展示身上的服装，镜头由远到近推进"等'
 const videoModel = ref('doubao-seedance-2-0-fast-260128')
 const videoPrompt = ref(DEFAULT_VIDEO_PROMPT)
+const isVideoPromptDefault = computed(() => videoPrompt.value === DEFAULT_VIDEO_PROMPT)
 const videoAspectRatio = ref('1:1')
 const videoDuration = ref(5)
 const videoResolution = ref('720p')
@@ -63,8 +64,6 @@ const imageSubmissionStartedAt = ref('')
 let videoPollTimer: number | undefined
 let imagePollTimer: number | undefined
 let imageProgressTimer: number | undefined
-let hasFocusedVideoPrompt = false
-
 const videoModelOptions = [
   {
     label: 'Doubao-Seedance-2.0-fast',
@@ -171,9 +170,11 @@ function safeResults<T>(list: { results?: T[] } | unknown): T[] {
 }
 
 function onVideoPromptFocus() {
-  if (hasFocusedVideoPrompt) return
-  hasFocusedVideoPrompt = true
   if (videoPrompt.value === DEFAULT_VIDEO_PROMPT) videoPrompt.value = ''
+}
+
+function onVideoPromptBlur() {
+  if (!videoPrompt.value.trim()) videoPrompt.value = DEFAULT_VIDEO_PROMPT
 }
 
 async function analyzeVideoPrompt() {
@@ -499,7 +500,9 @@ onUnmounted(() => {
                 v-model="videoPrompt"
                 :image-ready="Boolean(videoImageFile)"
                 :analyzing="isAnalyzingPrompt"
+                :is-default="isVideoPromptDefault"
                 @focus="onVideoPromptFocus"
+                @blur="onVideoPromptBlur"
                 @analyze="analyzeVideoPrompt"
               />
               <div class="form-row">
