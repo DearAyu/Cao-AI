@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onUnmounted, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { EditOutlined } from '@ant-design/icons-vue'
 import { runPromptAssistant } from '../api/promptAnalysis'
@@ -19,6 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const guideOpen = ref(false)
+const videoBrief = ref('')
 const productTitle = ref('')
 const productDetail = ref('')
 const sellingPoints = ref<string[]>([])
@@ -26,6 +27,34 @@ const assistantPrompt = ref('')
 const revisionInstruction = ref('')
 const assistantLoading = ref(false)
 const revisionLoading = ref(false)
+const assistantImage = ref<File | null>(null)
+const assistantImagePreview = ref('')
+
+function onAssistantImageChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    message.error('仅支持 PNG / JPG / WEBP 图片')
+    input.value = ''
+    return
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    message.error('图片不能超过 10MB')
+    input.value = ''
+    return
+  }
+  if (assistantImagePreview.value) URL.revokeObjectURL(assistantImagePreview.value)
+  assistantImage.value = file
+  assistantImagePreview.value = URL.createObjectURL(file)
+  input.value = ''
+}
+
+function clearAssistantImage() {
+  if (assistantImagePreview.value) URL.revokeObjectURL(assistantImagePreview.value)
+  assistantImage.value = null
+  assistantImagePreview.value = ''
+}
 
 async function generateAssistantPrompt() {
   if (!productTitle.value.trim() || !productDetail.value.trim()) {
@@ -35,8 +64,10 @@ async function generateAssistantPrompt() {
   assistantLoading.value = true
   try {
     const result = await runPromptAssistant({
+      video_brief: videoBrief.value,
       product_title: productTitle.value,
       product_detail: productDetail.value,
+      reference_image: assistantImage.value,
     })
     sellingPoints.value = result.selling_points
     assistantPrompt.value = result.prompt
@@ -61,11 +92,13 @@ async function reviseAssistantPrompt() {
   try {
     const result = await runPromptAssistant({
       action: 'revise',
+      video_brief: videoBrief.value,
       product_title: productTitle.value,
       product_detail: productDetail.value,
       selling_points: sellingPoints.value,
       current_prompt: assistantPrompt.value,
       revision_instruction: revisionInstruction.value,
+      reference_image: assistantImage.value,
     })
     sellingPoints.value = result.selling_points
     assistantPrompt.value = result.prompt
@@ -84,6 +117,8 @@ function applyAssistantPrompt() {
   guideOpen.value = false
   message.success('已应用到提示词')
 }
+
+onUnmounted(clearAssistantImage)
 </script>
 
 <template>
@@ -139,6 +174,15 @@ function applyAssistantPrompt() {
       />
 
       <a-form layout="vertical" class="prompt-assistant__form">
+        <a-form-item label="视频需求简述">
+          <a-textarea
+            v-model:value="videoBrief"
+            placeholder="例如：我是 TK 美区卖家，需要为户外帐篷生成一个爆款短视频，突出防雨、快开、多人露营场景。"
+            :rows="3"
+            :maxlength="1000"
+            show-count
+          />
+        </a-form-item>
         <a-form-item label="商品标题" required>
           <a-input
             v-model:value="productTitle"
@@ -154,6 +198,22 @@ function applyAssistantPrompt() {
             :maxlength="3000"
             show-count
           />
+        </a-form-item>
+        <a-form-item label="参考图片（可选）">
+          <label class="prompt-assistant__image-upload">
+            <input
+              data-testid="prompt-assistant-image"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              @change="onAssistantImageChange"
+            />
+            <img v-if="assistantImagePreview" :src="assistantImagePreview" alt="提示词助手参考图" />
+            <span v-else>点击添加图片，帮助 AI 判断商品外观和卖点</span>
+          </label>
+          <div v-if="assistantImage" class="prompt-assistant__image-meta">
+            <span>{{ assistantImage.name }}</span>
+            <a-button type="link" size="small" @click="clearAssistantImage">移除</a-button>
+          </div>
         </a-form-item>
         <a-button type="primary" :loading="assistantLoading" @click="generateAssistantPrompt">
           生成视频提示词

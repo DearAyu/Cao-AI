@@ -1,5 +1,5 @@
 from rest_framework import status, viewsets
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -27,6 +27,8 @@ class PromptAnalysisView(APIView):
 
 
 class PromptAssistantView(APIView):
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
     def post(self, request):
         serializer = PromptAssistantRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -34,16 +36,20 @@ class PromptAssistantView(APIView):
         try:
             if data["action"] == "revise":
                 result = revise_video_prompt(
+                    video_brief=data.get("video_brief", ""),
                     product_title=data.get("product_title", ""),
                     product_detail=data.get("product_detail", ""),
                     selling_points=data.get("selling_points", []),
                     current_prompt=data["current_prompt"],
                     revision_instruction=data["revision_instruction"],
+                    reference_image=data.get("reference_image"),
                 )
             else:
                 result = generate_video_prompt(
+                    video_brief=data.get("video_brief", ""),
                     product_title=data["product_title"],
                     product_detail=data["product_detail"],
+                    reference_image=data.get("reference_image"),
                 )
         except PromptAssistantError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)

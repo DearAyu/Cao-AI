@@ -278,9 +278,8 @@ describe('Cao AI workbench', () => {
   it('renders the studio redesign structure', () => {
     const wrapper = mountApp()
 
-    expect(wrapper.text()).toContain('商品影棚创作台')
-    expect(wrapper.text()).toContain('创作流程')
-    expect(wrapper.text()).toContain('影棚预览')
+    expect(wrapper.text()).toContain('TikTok带货视频创作平台')
+    expect(wrapper.text()).toContain('生成结果')
   })
 
   it('does not render legacy recent task panels in either generation workspace', async () => {
@@ -293,11 +292,170 @@ describe('Cao AI workbench', () => {
     expect(wrapper.text()).not.toContain('最近图片任务')
   })
 
+  it('shows detailed records and progress for the 10 most recent video jobs', async () => {
+    const jobs = Array.from({ length: 12 }, (_, index) => {
+      const id = 212 - index
+      const status = index === 1 ? 'processing' : index === 2 ? 'failed' : 'succeeded'
+      return {
+        id,
+        provider: 'volcengine',
+        provider_label: '火山 Seedance',
+        model_name: 'doubao-seedance-2-0-fast-260128',
+        status,
+        prompt: `最近视频提示词 ${id}`,
+        aspect_ratio: '1:1',
+        duration: 5,
+        resolution: '720p',
+        source_image_url: `/media/video-source-${id}.png`,
+        source_asset_urls: [],
+        remote_task_id: `recent-video-task-${id}`,
+        result_video_url: status === 'succeeded' ? `/media/video-result-${id}.mp4` : '',
+        error_message: status === 'failed' ? '供应商生成失败' : '',
+        created_at: `2026-06-19T12:${String(59 - index).padStart(2, '0')}:00Z`,
+        updated_at: `2026-06-19T12:${String(59 - index).padStart(2, '0')}:00Z`,
+      }
+    })
+    ;(listVideoJobs as Mock).mockResolvedValueOnce({ results: jobs })
+    const wrapper = mountApp()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('生成结果')
+    expect(wrapper.findAll('.result-record')).toHaveLength(10)
+    expect(wrapper.text()).toContain('recent-video-task-212')
+    expect(wrapper.text()).toContain('recent-video-task-211')
+    expect(wrapper.text()).toContain('recent-video-task-203')
+    expect(wrapper.text()).not.toContain('recent-video-task-202')
+    expect(wrapper.text()).toContain('供应商生成失败')
+    expect(wrapper.find('[data-testid="video-generation-stage"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="video-result-failed"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('最近视频任务')
+  })
   it('keeps video generate disabled until an image is selected', () => {
     const wrapper = mountApp()
     const button = wrapper.find('[data-testid="generate-button"]')
 
     expect(button.attributes('disabled')).toBeDefined()
+  })
+
+  it('allows selecting multiple image or video assets for a video job', async () => {
+    ;(createVideoJob as Mock).mockResolvedValueOnce({
+      id: 4,
+      provider: 'volcengine',
+      provider_label: '火山 Seedance',
+      model_name: 'doubao-seedance-2-0-fast-260128',
+      status: 'submitted',
+      prompt: '',
+      aspect_ratio: '1:1',
+      duration: 5,
+      resolution: '720p',
+      source_image_url: '',
+      source_asset_urls: [],
+      remote_task_id: 'mock-video-assets',
+      result_video_url: '',
+      error_message: '',
+      created_at: '2026-06-16T00:00:00Z',
+      updated_at: '2026-06-16T00:00:00Z',
+    })
+    const wrapper = mountApp()
+    const input = wrapper.find('input[type="file"]')
+    const image = new File(['image'], 'product.png', { type: 'image/png' })
+    const video = new File(['video'], 'motion.mp4', { type: 'video/mp4' })
+
+    expect(input.attributes('multiple')).toBeDefined()
+    expect(input.attributes('accept')).toContain('video/mp4')
+    Object.defineProperty(input.element, 'files', { value: [image, video] })
+
+    await input.trigger('change')
+    await wrapper.find('[data-testid="generate-button"]').trigger('click')
+
+    expect(createVideoJob).toHaveBeenCalledWith(expect.objectContaining({
+      source_image: image,
+      source_files: [image, video],
+    }))
+    expect(wrapper.text()).toContain('2 / 3')
+  })
+
+  it('downloads a generated video through a browser blob URL without opening a tab', async () => {
+    ;(createVideoJob as Mock).mockResolvedValueOnce({
+      id: 5,
+      provider: 'volcengine',
+      provider_label: '火山 Seedance',
+      model_name: 'doubao-seedance-2-0-fast-260128',
+      status: 'succeeded',
+      prompt: 'Video prompt',
+      aspect_ratio: '1:1',
+      duration: 5,
+      resolution: '720p',
+      source_image_url: '/media/source.png',
+      source_asset_urls: [],
+      remote_task_id: 'mock-video-download',
+      result_video_url: '/media/results/job-5-mock.mp4',
+      error_message: '',
+      created_at: '2026-06-16T00:00:00Z',
+      updated_at: '2026-06-16T00:00:00Z',
+    })
+    const videoBlob = new Blob(['video'], { type: 'video/mp4' })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: vi.fn().mockResolvedValue(videoBlob) })
+    vi.stubGlobal('fetch', fetchMock)
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL')
+      .mockReturnValueOnce('blob:preview')
+      .mockReturnValue('blob:video-download')
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const wrapper = mountApp()
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'product.png', { type: 'image/png' })],
+    })
+
+    await input.trigger('change')
+    await wrapper.find('[data-testid="generate-button"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="download-video"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith('/media/results/job-5-mock.mp4')
+    expect(createObjectUrl).toHaveBeenLastCalledWith(videoBlob)
+    expect(anchorClick).toHaveBeenCalledTimes(1)
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:video-download')
+
+    wrapper.unmount()
+    anchorClick.mockRestore()
+    revokeObjectUrl.mockRestore()
+    createObjectUrl.mockRestore()
+    vi.unstubAllGlobals()
+  })
+
+  it('rejects more than three uploaded video assets before submitting', async () => {
+    const wrapper = mountApp()
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [
+        new File(['1'], 'one.png', { type: 'image/png' }),
+        new File(['2'], 'two.png', { type: 'image/png' }),
+        new File(['3'], 'three.png', { type: 'image/png' }),
+        new File(['4'], 'four.png', { type: 'image/png' }),
+      ],
+    })
+
+    await input.trigger('change')
+    await wrapper.find('[data-testid="generate-button"]').trigger('click')
+
+    expect(createVideoJob).not.toHaveBeenCalled()
+  })
+
+  it('rejects an oversized video asset before submitting', async () => {
+    const wrapper = mountApp()
+    const input = wrapper.find('input[type="file"]')
+    const file = new File(['video'], 'large.mp4', { type: 'video/mp4' })
+    Object.defineProperty(file, 'size', { value: 50 * 1024 * 1024 + 1 })
+    Object.defineProperty(input.element, 'files', { value: [file] })
+
+    await input.trigger('change')
+    await wrapper.find('[data-testid="generate-button"]').trigger('click')
+
+    expect(createVideoJob).not.toHaveBeenCalled()
   })
 
   it('shows image generation providers after switching workspace', async () => {
@@ -309,7 +467,7 @@ describe('Cao AI workbench', () => {
     expect(wrapper.find('[data-testid="generate-image-button"]').attributes('disabled')).toBeDefined()
   })
 
-  it('replaces the image preview with a generation progress card after submission', async () => {
+  it('does not render a submitted image job as a generation result', async () => {
     ;(createImageJob as Mock).mockResolvedValueOnce({
       id: 31,
       provider: 'aliyun',
@@ -338,14 +496,11 @@ describe('Cao AI workbench', () => {
     await wrapper.get('[data-testid="generate-image-button"]').trigger('click')
     await flushPromises()
 
-    const stage = wrapper.get('[data-testid="image-generation-stage"]')
-    expect(stage.text()).toContain('阿里 wan2.7-image')
-    expect(stage.text()).toContain('2K')
-    expect(stage.text()).toContain('image-task-31')
-    expect(stage.text()).toContain('AI 生成中… 8%')
+    expect(wrapper.find('[data-testid="image-generation-stage"]').exists()).toBe(false)
+    expect(wrapper.findAll('.result-record')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('image-task-31')
     expect(wrapper.find('.image-monitor').exists()).toBe(false)
   })
-
   it('shows a complete task detail sheet with every generated image', async () => {
     ;(createImageJob as Mock).mockResolvedValueOnce({
       id: 32,
@@ -438,7 +593,7 @@ describe('Cao AI workbench', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shows detailed records for only the 10 most recent image jobs', async () => {
+  it('shows detailed records for only the 10 most recent final image jobs', async () => {
     const jobs = Array.from({ length: 12 }, (_, index) => {
       const id = 112 - index
       const status = index === 1 ? 'processing' : index === 2 ? 'failed' : 'succeeded'
@@ -469,13 +624,14 @@ describe('Cao AI workbench', () => {
     expect(wrapper.text()).toContain('生成结果')
     expect(wrapper.findAll('.result-record')).toHaveLength(10)
     expect(wrapper.text()).toContain('recent-image-task-112')
-    expect(wrapper.text()).toContain('recent-image-task-103')
-    expect(wrapper.text()).not.toContain('recent-image-task-102')
+    expect(wrapper.text()).toContain('recent-image-task-102')
+    expect(wrapper.text()).not.toContain('recent-image-task-111')
+    expect(wrapper.text()).not.toContain('recent-image-task-101')
     expect(wrapper.text()).toContain('供应商生成失败')
-    expect(wrapper.find('[data-testid="image-generation-stage"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="image-generation-stage"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="image-result-failed"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('最近图片任务')
   })
-
   it('keeps navigation usable when image jobs response is malformed', async () => {
     ;(listImageJobs as Mock).mockResolvedValueOnce({} as never)
     const wrapper = mountApp()

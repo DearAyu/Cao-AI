@@ -1,4 +1,5 @@
 from pathlib import Path
+from shutil import copyfile
 from urllib.parse import urlparse
 
 import requests
@@ -36,9 +37,15 @@ def refresh_job(job: VideoJob) -> VideoJob:
         job.raw_response = result.get("raw_response", job.raw_response)
         job.error_message = result.get("error_message", "")
         result_url = result.get("result_url")
-        if job.status == VideoJob.Status.SUCCEEDED and result_url and not job.result_video:
-            path = download_file(result_url, job)
-            job.result_video.name = str(path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+        if job.status == VideoJob.Status.SUCCEEDED and not job.result_video:
+            if result_url:
+                path = download_file(result_url, job)
+            elif result.get("mock_result"):
+                path = write_mock_video_file(job)
+            else:
+                path = None
+            if path:
+                job.result_video.name = str(path.relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
     except Exception as exc:
         job.status = VideoJob.Status.FAILED
         job.error_message = str(exc)
@@ -63,6 +70,28 @@ def download_file(url: str, job: VideoJob) -> Path:
         for chunk in response.iter_content(chunk_size=1024 * 128):
             if chunk:
                 handle.write(chunk)
+    return target
+
+
+def write_mock_video_file(job: VideoJob) -> Path:
+    results_dir = Path(settings.MEDIA_ROOT) / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    target = results_dir / f"job-{job.pk}-mock.mp4"
+    if target.exists() and target.stat().st_size:
+        return target
+
+    sample = next(
+        (
+            path
+            for path in sorted(results_dir.glob("*.mp4"), key=lambda item: item.stat().st_size)
+            if path.resolve() != target.resolve() and path.stat().st_size > 1024
+        ),
+        None,
+    )
+    if sample:
+        copyfile(sample, target)
+    else:
+        target.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom\x00\x00\x00\x08free")
     return target
 
 

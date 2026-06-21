@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+﻿import { flushPromises, mount } from '@vue/test-utils'
 import Antd from 'ant-design-vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import VideoPromptEditor from './VideoPromptEditor.vue'
@@ -32,7 +32,7 @@ afterEach(() => {
 
 describe('VideoPromptEditor', () => {
   it('shows a live custom count and enforces the 2500 character limit', async () => {
-    const wrapper = mountEditor({ modelValue: '镜头推进' })
+    const wrapper = mountEditor({ modelValue: 'push' })
     const textarea = wrapper.find('textarea')
 
     expect(textarea.attributes('rows')).toBe('5')
@@ -40,25 +40,25 @@ describe('VideoPromptEditor', () => {
     expect(wrapper.find('.video-prompt-editor__count').text()).toBe('4 / 2500')
     expect(wrapper.find('.ant-input-data-count').exists()).toBe(false)
 
-    await wrapper.setProps({ modelValue: '产品缓慢旋转' })
-    expect(wrapper.find('.video-prompt-editor__count').text()).toBe('6 / 2500')
+    await wrapper.setProps({ modelValue: 'slow orbit' })
+    expect(wrapper.find('.video-prompt-editor__count').text()).toBe('10 / 2500')
   })
 
   it('emits v-model updates, focus and blur from the textarea', async () => {
     const wrapper = mountEditor()
     const textarea = wrapper.find('textarea')
 
-    await textarea.setValue('新的提示词')
+    await textarea.setValue('new prompt')
     await textarea.trigger('focus')
     await textarea.trigger('blur')
 
-    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['新的提示词'])
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['new prompt'])
     expect(wrapper.emitted('focus')).toHaveLength(1)
     expect(wrapper.emitted('blur')).toHaveLength(1)
   })
 
   it('renders default prompt text in muted gray state', () => {
-    const wrapper = mountEditor({ modelValue: '默认提示说明', isDefault: true })
+    const wrapper = mountEditor({ modelValue: '榛樿鎻愮ず璇存槑', isDefault: true })
     const textarea = wrapper.find('textarea')
 
     expect(textarea.classes()).toContain('video-prompt-editor__textarea--muted')
@@ -93,7 +93,7 @@ describe('VideoPromptEditor', () => {
     const analyzeButton = wrapper.get('[data-testid="analyze-prompt"]')
 
     expect(analyzeButton.attributes('disabled')).toBeDefined()
-    expect(analyzeButton.text()).toContain('反推中')
+    expect(analyzeButton.find('.ant-btn-loading-icon').exists()).toBe(true)
     expect(analyzeButton.find('.ant-btn-loading-icon').exists()).toBe(true)
   })
 
@@ -119,7 +119,7 @@ describe('VideoPromptEditor', () => {
 
   it('generates and applies an assistant prompt', async () => {
     vi.mocked(runPromptAssistant).mockResolvedValueOnce({
-      selling_points: ['轻薄', '百搭'],
+      selling_points: ['杞昏杽', '鐧炬惌'],
       prompt: 'Generated video prompt',
     })
     const wrapper = mountEditor()
@@ -127,13 +127,17 @@ describe('VideoPromptEditor', () => {
     await wrapper.get('[data-testid="open-prompt-guide"]').trigger('click')
     await flushPromises()
 
-    const inputs = document.body.querySelectorAll<HTMLInputElement>('.prompt-assistant input')
-    inputs[0].value = '法式针织开衫'
-    inputs[0].dispatchEvent(new Event('input'))
-    const detail = document.body.querySelector<HTMLTextAreaElement>('.prompt-assistant textarea')
+    const inputs = document.body.querySelectorAll<HTMLInputElement>('.prompt-assistant input:not([type="file"])')
+    inputs[0].value = 'product title'
+    inputs[0].dispatchEvent(new Event('input', { bubbles: true }))
+    const textareas = document.body.querySelectorAll<HTMLTextAreaElement>('.prompt-assistant textarea')
+    const brief = textareas[0]
+    brief.value = 'I am a TikTok US seller and need a viral short video for my outdoor tent.'
+    brief.dispatchEvent(new Event('input', { bubbles: true }))
+    const detail = textareas[1]
     expect(detail).not.toBeNull()
-    detail!.value = '柔软亲肤，适合通勤。'
-    detail!.dispatchEvent(new Event('input'))
+    detail.value = 'product detail'
+    detail.dispatchEvent(new Event('input', { bubbles: true }))
     await flushPromises()
 
     const buttons = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
@@ -141,11 +145,50 @@ describe('VideoPromptEditor', () => {
     await flushPromises()
 
     expect(Array.from(document.body.querySelectorAll<HTMLTextAreaElement>('textarea')).some((item) => item.value === 'Generated video prompt')).toBe(true)
+    expect(runPromptAssistant).toHaveBeenCalledWith(expect.objectContaining({
+      video_brief: 'I am a TikTok US seller and need a viral short video for my outdoor tent.',
+    }))
     Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent?.includes('应用到提示词'))
       ?.click()
     await flushPromises()
 
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['Generated video prompt'])
+  })
+
+  it('can attach an optional product image to the prompt assistant request', async () => {
+    vi.mocked(runPromptAssistant).mockResolvedValueOnce({
+      selling_points: ['璐ㄦ劅娓呮櫚'],
+      prompt: 'Generated with image',
+    })
+    const wrapper = mountEditor()
+    const referenceImage = new File(['image'], 'reference.png', { type: 'image/png' })
+
+    await wrapper.get('[data-testid="open-prompt-guide"]').trigger('click')
+    await flushPromises()
+
+    const fileInput = document.body.querySelector<HTMLInputElement>('[data-testid="prompt-assistant-image"]')
+    expect(fileInput).not.toBeNull()
+    Object.defineProperty(fileInput, 'files', { value: [referenceImage] })
+    fileInput!.dispatchEvent(new Event('change', { bubbles: true }))
+
+    const inputs = document.body.querySelectorAll<HTMLInputElement>('.prompt-assistant input:not([type="file"])')
+    inputs[0].value = 'product title'
+    inputs[0].dispatchEvent(new Event('input', { bubbles: true }))
+    const textareas = document.body.querySelectorAll<HTMLTextAreaElement>('.prompt-assistant textarea')
+    textareas[0].value = 'Make a TikTok US viral product video.'
+    textareas[0].dispatchEvent(new Event('input', { bubbles: true }))
+    const detail = textareas[1]
+    detail.value = 'product detail'
+    detail.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    document.body.querySelector<HTMLButtonElement>('.prompt-assistant .ant-btn-primary')?.click()
+    await flushPromises()
+
+    expect(runPromptAssistant).toHaveBeenCalledWith(expect.objectContaining({
+      reference_image: referenceImage,
+    }))
+    expect(document.body.textContent).toContain('reference.png')
   })
 })

@@ -18,6 +18,12 @@ export interface VideoJob {
   duration: number
   resolution: string
   source_image_url: string
+  source_asset_urls: Array<{
+    url: string
+    media_type: 'image' | 'video'
+    original_name: string
+    size: number
+  }>
   remote_task_id: string
   result_video_url: string
   error_message: string
@@ -47,6 +53,7 @@ export async function createVideoJob(payload: {
   duration: number
   resolution: string
   source_image: File
+  source_files?: File[]
 }): Promise<VideoJob> {
   const form = new FormData()
   form.append('provider', payload.provider)
@@ -56,6 +63,9 @@ export async function createVideoJob(payload: {
   form.append('duration', String(payload.duration))
   form.append('resolution', payload.resolution)
   form.append('source_image', payload.source_image)
+  for (const file of payload.source_files?.length ? payload.source_files : [payload.source_image]) {
+    form.append('source_files', file)
+  }
   const response = await api.post<VideoJob>('/video-jobs/', form)
   return response.data
 }

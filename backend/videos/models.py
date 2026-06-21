@@ -36,6 +36,25 @@ class VideoJob(models.Model):
         return f"{self.get_provider_display()} {self.status} #{self.pk}"
 
 
+class VideoJobAsset(models.Model):
+    class MediaType(models.TextChoices):
+        IMAGE = "image", "Image"
+        VIDEO = "video", "Video"
+
+    job = models.ForeignKey(VideoJob, related_name="source_assets", on_delete=models.CASCADE)
+    file = models.FileField(upload_to="video_assets/")
+    media_type = models.CharField(max_length=16, choices=MediaType.choices)
+    original_name = models.CharField(max_length=255, blank=True)
+    size = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.media_type} asset for video job #{self.job_id}"
+
+
 class ImageJob(models.Model):
     class Provider(models.TextChoices):
         ALIYUN = "aliyun", "阿里 wan2.7-image"

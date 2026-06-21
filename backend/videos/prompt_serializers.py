@@ -15,6 +15,7 @@ class PromptAnalysisRequestSerializer(serializers.Serializer):
 
 class PromptAssistantRequestSerializer(serializers.Serializer):
     action = serializers.ChoiceField(choices=["generate", "revise"], default="generate")
+    video_brief = serializers.CharField(max_length=1000, allow_blank=True, required=False, default="")
     product_title = serializers.CharField(max_length=300, allow_blank=True)
     product_detail = serializers.CharField(max_length=3000, allow_blank=True)
     selling_points = serializers.ListField(
@@ -24,6 +25,14 @@ class PromptAssistantRequestSerializer(serializers.Serializer):
     )
     current_prompt = serializers.CharField(max_length=2500, allow_blank=True, required=False, default="")
     revision_instruction = serializers.CharField(max_length=1000, allow_blank=True, required=False, default="")
+    reference_image = serializers.ImageField(required=False, allow_empty_file=False)
+
+    def validate_reference_image(self, value):
+        if value.size > settings.PROVIDER_IMAGE_MAX_BYTES:
+            raise serializers.ValidationError(
+                f"图片大小不能超过 {settings.PROVIDER_IMAGE_MAX_BYTES} 字节。"
+            )
+        return value
 
     def validate(self, attrs):
         action = attrs.get("action", "generate")

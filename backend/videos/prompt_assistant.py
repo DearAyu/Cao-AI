@@ -1,3 +1,4 @@
+﻿import base64
 import json
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,7 @@ def load_prompt_rules() -> str:
     try:
         return path.read_text(encoding="utf-8").strip()
     except OSError as exc:
-        raise PromptAssistantError(f"无法读取预设提示词规则：{path}") from exc
+        raise PromptAssistantError(f"鏃犳硶璇诲彇棰勮鎻愮ず璇嶈鍒欙細{path}") from exc
 
 
 def extract_assistant_result(data: Any) -> dict[str, Any]:
@@ -28,7 +29,7 @@ def extract_assistant_result(data: Any) -> dict[str, Any]:
         content = ""
 
     if not isinstance(content, str):
-        raise PromptAssistantError("DeepSeek 未返回有效内容")
+        raise PromptAssistantError("DeepSeek returned invalid content")
 
     text = content.strip()
     if text.startswith("```"):
@@ -44,16 +45,16 @@ def extract_assistant_result(data: Any) -> dict[str, Any]:
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise PromptAssistantError("DeepSeek 返回内容不是有效 JSON") from exc
+        raise PromptAssistantError("DeepSeek 杩斿洖鍐呭涓嶆槸鏈夋晥 JSON") from exc
 
     selling_points = parsed.get("selling_points")
     prompt = parsed.get("prompt")
     if not isinstance(selling_points, list) or not all(isinstance(item, str) for item in selling_points):
-        raise PromptAssistantError("DeepSeek 返回的卖点格式无效")
+        raise PromptAssistantError("DeepSeek returned invalid selling_points")
     if not isinstance(prompt, str) or not prompt.strip():
-        raise PromptAssistantError("DeepSeek 未返回最终视频提示词")
+        raise PromptAssistantError("DeepSeek 鏈繑鍥炴渶缁堣棰戞彁绀鸿瘝")
     if len(prompt) > 2500:
-        raise PromptAssistantError("DeepSeek 返回的提示词超过2500个字符")
+        raise PromptAssistantError("DeepSeek prompt exceeds 2500 characters")
 
     return {
         "selling_points": [item.strip() for item in selling_points if item.strip()],
@@ -62,7 +63,7 @@ def extract_assistant_result(data: Any) -> dict[str, Any]:
 
 
 def mock_assistant_result(product_title: str) -> dict[str, Any]:
-    name = product_title.strip() or "商品"
+    name = product_title.strip() or "鍟嗗搧"
     return {
         "selling_points": ["保持商品原样", "突出核心质感", "适合短视频展示"],
         "prompt": (
@@ -77,11 +78,30 @@ def mock_assistant_result(product_title: str) -> dict[str, Any]:
     }
 
 
-def deepseek_chat(user_text: str) -> dict[str, Any]:
+def image_data_url(image) -> str:
+    content_type = getattr(image, "content_type", "") or "image/png"
+    image.open("rb") if hasattr(image, "open") else None
+    try:
+        raw = image.read()
+    finally:
+        image.close() if hasattr(image, "close") else None
+    return f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+def build_user_content(user_text: str, reference_image=None):
+    if not reference_image:
+        return user_text
+    return [
+        {"type": "text", "text": f"{user_text}\n\nReference image: identify product appearance, color, shape, material, and visible selling points."},
+        {"type": "image_url", "image_url": {"url": image_data_url(reference_image)}},
+    ]
+
+
+def deepseek_chat(user_text: str, reference_image=None) -> dict[str, Any]:
     if settings.VIDEO_PROVIDER_FORCE_MOCK:
         return mock_assistant_result("")
     if not settings.DEEPSEEK_API_KEY:
-        raise PromptAssistantError("缺少 DEEPSEEK_API_KEY")
+        raise PromptAssistantError("缂哄皯 DEEPSEEK_API_KEY")
 
     payload = {
         "model": settings.DEEPSEEK_MODEL,
@@ -89,12 +109,13 @@ def deepseek_chat(user_text: str) -> dict[str, Any]:
             {
                 "role": "system",
                 "content": (
-                    "你是跨境电商视频提示词专家。只输出 JSON，不要 Markdown。"
-                    "JSON 格式必须是 {\"selling_points\":[\"...\"],\"prompt\":\"...\"}。"
-                    "prompt 必须可直接用于视频生成，且不超过2500个字符。"
+                    "You are a cross-border ecommerce video prompt expert. "
+                    "Return JSON only, no Markdown. "
+                    "The JSON format must be {\"selling_points\":[\"...\"],\"prompt\":\"...\"}. "
+                    "The prompt must be ready for video generation and no longer than 2500 characters."
                 ),
             },
-            {"role": "user", "content": user_text},
+            {"role": "user", "content": build_user_content(user_text, reference_image)},
         ],
         "temperature": 0.4,
         "max_tokens": 2000,
@@ -119,38 +140,34 @@ def deepseek_chat(user_text: str) -> dict[str, Any]:
     return extract_assistant_result(response.json())
 
 
-def generate_video_prompt(product_title: str, product_detail: str) -> dict[str, Any]:
+def generate_video_prompt(video_brief: str, product_title: str, product_detail: str, reference_image=None) -> dict[str, Any]:
     if settings.VIDEO_PROVIDER_FORCE_MOCK:
         return mock_assistant_result(product_title)
 
     rules = load_prompt_rules()
     user_text = f"""
-请根据商品信息先总结商品卖点，再严格依据预设提示词规则生成最终视频生成提示词。
+璇锋牴鎹晢鍝佷俊鎭厛鎬荤粨鍟嗗搧鍗栫偣锛屽啀涓ユ牸渚濇嵁棰勮鎻愮ず璇嶈鍒欑敓鎴愭渶缁堣棰戠敓鎴愭彁绀鸿瘝銆?
+User video brief: {video_brief or "未填写"}
 
-商品标题：
-{product_title}
+鍟嗗搧鏍囬锛?{product_title}
 
-商品详情：
-{product_detail}
+鍟嗗搧璇︽儏锛?{product_detail}
 
-预设提示词规则：
+棰勮鎻愮ず璇嶈鍒欙細
 {rules}
 
-要求：
-1. selling_points 输出 3-5 条，中文，短句。
-2. prompt 使用英文为主，必要商品信息可保留专有名词。
-3. prompt 必须遵守预设规则，尤其是 Keep product identical、Ref 0.95、禁止 AI 自行添加额外文字/配音/弹幕。
-4. 只输出 JSON。
-""".strip()
-    return deepseek_chat(user_text)
+瑕佹眰锛?1. selling_points 杈撳嚭 3-5 鏉★紝涓枃锛岀煭鍙ャ€?2. prompt 浣跨敤鑻辨枃涓轰富锛屽繀瑕佸晢鍝佷俊鎭彲淇濈暀涓撴湁鍚嶈瘝銆?3. prompt 蹇呴』閬靛畧棰勮瑙勫垯锛屽挨鍏舵槸 Keep product identical銆丷ef 0.95銆佺姝?AI 鑷娣诲姞棰濆鏂囧瓧/閰嶉煶/寮瑰箷銆?4. 鍙緭鍑?JSON銆?""".strip()
+    return deepseek_chat(user_text, reference_image=reference_image)
 
 
 def revise_video_prompt(
+    video_brief: str,
     product_title: str,
     product_detail: str,
     selling_points: list[str],
     current_prompt: str,
     revision_instruction: str,
+    reference_image=None,
 ) -> dict[str, Any]:
     if settings.VIDEO_PROVIDER_FORCE_MOCK:
         result = mock_assistant_result(product_title)
@@ -160,29 +177,22 @@ def revise_video_prompt(
 
     rules = load_prompt_rules()
     user_text = f"""
-请根据用户修改要求，改写当前视频生成提示词。必须继续遵守预设提示词规则。
+璇锋牴鎹敤鎴蜂慨鏀硅姹傦紝鏀瑰啓褰撳墠瑙嗛鐢熸垚鎻愮ず璇嶃€傚繀椤荤户缁伒瀹堥璁炬彁绀鸿瘝瑙勫垯銆?
+User video brief: {video_brief or "未填写"}
 
-商品标题：
-{product_title}
+鍟嗗搧鏍囬锛?{product_title}
 
-商品详情：
-{product_detail}
+鍟嗗搧璇︽儏锛?{product_detail}
 
-已总结卖点：
-{json.dumps(selling_points, ensure_ascii=False)}
+宸叉€荤粨鍗栫偣锛?{json.dumps(selling_points, ensure_ascii=False)}
 
-当前提示词：
+褰撳墠鎻愮ず璇嶏細
 {current_prompt}
 
-用户修改要求：
-{revision_instruction}
+鐢ㄦ埛淇敼瑕佹眰锛?{revision_instruction}
 
-预设提示词规则：
+棰勮鎻愮ず璇嶈鍒欙細
 {rules}
 
-要求：
-1. selling_points 可沿用或小幅修正。
-2. prompt 必须保留产品原样锁定、Ref 0.95、禁止额外内容等核心限制。
-3. 只输出 JSON。
-""".strip()
-    return deepseek_chat(user_text)
+瑕佹眰锛?1. selling_points 鍙部鐢ㄦ垨灏忓箙淇銆?2. prompt 蹇呴』淇濈暀浜у搧鍘熸牱閿佸畾銆丷ef 0.95銆佺姝㈤澶栧唴瀹圭瓑鏍稿績闄愬埗銆?3. 鍙緭鍑?JSON銆?""".strip()
+    return deepseek_chat(user_text, reference_image=reference_image)

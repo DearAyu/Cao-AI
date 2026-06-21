@@ -9,7 +9,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from .image_providers import AliWanImageProvider, SeedreamImageProvider
-from .models import ImageJob, VideoJob
+from .models import ImageJob, VideoJob, VideoJobAsset
 from .prompt_analysis import (
     PROMPT_ANALYSIS_INSTRUCTION,
     PromptAnalysisError,
@@ -87,6 +87,103 @@ class VideoJobApiTests(TestCase):
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(len(list_response.data["results"]), 1)
 
+    def test_mock_detail_refresh_finishes_with_local_result_video(self):
+        create_response = self.client.post(
+            reverse("video-job-list"),
+            {
+                "provider": "volcengine",
+                "prompt": "A premium marketplace product video",
+                "source_image": self.image_file(),
+            },
+            format="multipart",
+        )
+
+        response = self.client.get(reverse("video-job-detail", args=[create_response.data["id"]]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "succeeded")
+        self.assertIn("results/job-", response.data["result_video"])
+        self.assertTrue(response.data["result_video_url"])
+
+    def test_create_accepts_up_to_three_image_or_video_assets(self):
+        source_image = self.image_file("main.png")
+        response = self.client.post(
+            reverse("video-job-list"),
+            {
+                "provider": "volcengine",
+                "prompt": "A premium marketplace product video",
+                "source_image": source_image,
+                "source_files": [
+                    source_image,
+                    SimpleUploadedFile("detail.webp", b"webp", content_type="image/webp"),
+                    SimpleUploadedFile("motion.mp4", b"video", content_type="video/mp4"),
+                ],
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(len(response.data["source_asset_urls"]), 3)
+        self.assertEqual(VideoJobAsset.objects.count(), 3)
+        self.assertEqual(VideoJobAsset.objects.filter(media_type=VideoJobAsset.MediaType.VIDEO).count(), 1)
+
+    def test_create_rejects_more_than_three_assets(self):
+        source_image = self.image_file("main.png")
+        response = self.client.post(
+            reverse("video-job-list"),
+            {
+                "provider": "volcengine",
+                "prompt": "A premium marketplace product video",
+                "source_image": source_image,
+                "source_files": [
+                    source_image,
+                    self.image_file("two.png"),
+                    self.image_file("three.png"),
+                    self.image_file("four.png"),
+                ],
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("source_files", response.data)
+
+    def test_create_rejects_unsupported_asset_type(self):
+        source_image = self.image_file("main.png")
+        response = self.client.post(
+            reverse("video-job-list"),
+            {
+                "provider": "volcengine",
+                "prompt": "A premium marketplace product video",
+                "source_image": source_image,
+                "source_files": [
+                    source_image,
+                    SimpleUploadedFile("notes.txt", b"bad", content_type="text/plain"),
+                ],
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("source_files", response.data)
+
+    def test_create_rejects_asset_larger_than_limit(self):
+        source_image = self.image_file("main.png")
+        large_video = SimpleUploadedFile("large.mp4", b"0" * (50 * 1024 * 1024 + 1), content_type="video/mp4")
+        response = self.client.post(
+            reverse("video-job-list"),
+            {
+                "provider": "volcengine",
+                "prompt": "A premium marketplace product video",
+                "source_image": source_image,
+                "source_files": [source_image, large_video],
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("source_files", response.data)
+
     def test_detail_refresh_downloads_completed_result(self):
         create_response = self.client.post(
             reverse("video-job-list"),
@@ -133,8 +230,8 @@ class VideoJobApiTests(TestCase):
         response = self.client.get(reverse("video-job-detail", args=[job.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["status"], "processing")
-        self.assertEqual(response.data["raw_response"], {"mock": "processing"})
+        self.assertEqual(response.data["status"], "succeeded")
+        self.assertEqual(response.data["raw_response"], {"mock": "succeeded"})
 
 
 @override_settings(
@@ -445,8 +542,8 @@ class PromptAssistantTests(TestCase):
     def test_loads_prompt_rules_file(self):
         rules = load_prompt_rules()
 
-        self.assertIn("产品原样锁定", rules)
-        self.assertIn("Link en bio", rules)
+        self.assertIn("主体锁定", rules)
+        self.assertIn("视频标题建议", rules)
 
     def test_generate_video_prompt_sends_product_details_and_rules_to_deepseek(self):
         class Response:
@@ -464,6 +561,7 @@ class PromptAssistantTests(TestCase):
         with patch("videos.prompt_assistant.request_with_retries", return_value=Response()) as request:
             with patch("videos.prompt_assistant.raise_for_bad_response"):
                 result = generate_video_prompt(
+                    video_brief="我是 TK 美区卖家，需要户外帐篷爆款短视频。",
                     product_title="法式针织开衫",
                     product_detail="柔软亲肤，适合通勤和约会。",
                 )
@@ -473,9 +571,42 @@ class PromptAssistantTests(TestCase):
         payload = request.call_args.kwargs["json"]
         self.assertEqual(payload["model"], "deepseek-v4-pro")
         user_text = payload["messages"][1]["content"]
+        self.assertIn("户外帐篷爆款短视频", user_text)
         self.assertIn("法式针织开衫", user_text)
         self.assertIn("柔软亲肤", user_text)
-        self.assertIn("产品原样锁定", user_text)
+        self.assertIn("主体锁定", user_text)
+
+    def test_generate_video_prompt_can_send_reference_image_to_deepseek(self):
+        class Response:
+            def json(self):
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": '{"selling_points":["图像卖点"],"prompt":"9:16 4K. Keep product identical."}'
+                            }
+                        }
+                    ]
+                }
+
+        image = SimpleUploadedFile(
+            "reference.png",
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82",
+            content_type="image/png",
+        )
+        with patch("videos.prompt_assistant.request_with_retries", return_value=Response()) as request:
+            with patch("videos.prompt_assistant.raise_for_bad_response"):
+                generate_video_prompt(
+                    video_brief="Make a TikTok US viral video.",
+                    product_title="商品标题",
+                    product_detail="商品详情",
+                    reference_image=image,
+                )
+
+        user_content = request.call_args.kwargs["json"]["messages"][1]["content"]
+        self.assertIsInstance(user_content, list)
+        self.assertEqual(user_content[1]["type"], "image_url")
+        self.assertIn("data:image/png;base64,", user_content[1]["image_url"]["url"])
 
     def test_extract_assistant_result_rejects_invalid_json(self):
         with self.assertRaises(PromptAssistantError):
@@ -498,6 +629,31 @@ class PromptAssistantTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["selling_points"], ["防滑"])
         self.assertEqual(response.data["prompt"], "Final video prompt")
+
+    def test_prompt_assistant_api_passes_optional_reference_image(self):
+        with patch(
+            "videos.views.generate_video_prompt",
+            return_value={"selling_points": ["image"], "prompt": "Final video prompt"},
+        ) as generate:
+            response = self.client.post(
+                reverse("prompt-assistant"),
+                {
+                    "video_brief": "Make a TikTok US viral video.",
+                    "product_title": "Product title",
+                    "product_detail": "Product detail",
+                    "reference_image": SimpleUploadedFile(
+                        "reference.png",
+                        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82",
+                        content_type="image/png",
+                    ),
+                },
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["prompt"], "Final video prompt")
+        self.assertEqual(generate.call_args.kwargs["video_brief"], "Make a TikTok US viral video.")
+        self.assertEqual(generate.call_args.kwargs["reference_image"].name, "reference.png")
 
     def test_prompt_assistant_api_revises_prompt(self):
         with patch(

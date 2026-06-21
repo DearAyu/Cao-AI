@@ -127,8 +127,8 @@ class MockVideoProvider(BaseVideoProvider):
         return f"mock-{job.provider}-{int(time.time() * 1000)}"
 
     def refresh(self, job: VideoJob) -> dict[str, Any]:
-        if job.status == VideoJob.Status.SUBMITTED:
-            return {"status": VideoJob.Status.PROCESSING, "raw_response": {"mock": "processing"}}
+        if job.status in {VideoJob.Status.SUBMITTED, VideoJob.Status.PROCESSING, VideoJob.Status.PENDING}:
+            return {"status": VideoJob.Status.SUCCEEDED, "raw_response": {"mock": "succeeded"}, "mock_result": True}
         return {"status": job.status, "raw_response": {"mock": "unchanged"}}
 
 

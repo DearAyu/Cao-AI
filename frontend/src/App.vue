@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   CloudUploadOutlined,
@@ -31,18 +31,28 @@ import {
 import VideoPromptEditor from './components/VideoPromptEditor.vue'
 
 type WorkspaceMode = 'video' | 'image' | 'materials' | 'history'
+type VideoSourceKind = 'image' | 'video'
+interface VideoSourceAsset {
+  file: File
+  previewUrl: string
+  kind: VideoSourceKind
+}
+
+const VIDEO_SOURCE_MAX_FILES = 3
+const VIDEO_SOURCE_MAX_BYTES = 50 * 1024 * 1024
+const VIDEO_SOURCE_ACCEPT = 'image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm'
+const VIDEO_SOURCE_ALLOWED_TYPES = new Set(VIDEO_SOURCE_ACCEPT.split(','))
 
 const mode = ref<WorkspaceMode>('video')
 
-const DEFAULT_VIDEO_PROMPT = '输入视频中想要的主体动作场景，使用 英文更准确。例如， "一个美女在展示身上的服装，镜头由远到近推进"等'
+const DEFAULT_VIDEO_PROMPT = '输入视频中想要的主体动作场景，使用 英文更准确。例如，"一个美女在展示身上的服装，镜头由远到近推进"等'
 const videoModel = ref('doubao-seedance-2-0-fast-260128')
 const videoPrompt = ref(DEFAULT_VIDEO_PROMPT)
 const isVideoPromptDefault = computed(() => videoPrompt.value === DEFAULT_VIDEO_PROMPT)
 const videoAspectRatio = ref('1:1')
 const videoDuration = ref(5)
 const videoResolution = ref('720p')
-const videoImageFile = ref<File | null>(null)
-const videoImagePreview = ref('')
+const videoSourceAssets = ref<VideoSourceAsset[]>([])
 const currentVideoJob = ref<VideoJob | null>(null)
 const videoJobs = ref<VideoJob[]>([])
 const isSubmittingVideo = ref(false)
@@ -113,25 +123,26 @@ const statusText: Record<string, string> = {
   failed: '失败',
 }
 
-const canGenerateVideo = computed(() => Boolean(videoImageFile.value) && !isSubmittingVideo.value)
+const videoSourceFiles = computed(() => videoSourceAssets.value.map((asset) => asset.file))
+const primaryVideoSource = computed(() => videoSourceAssets.value[0] ?? null)
+const promptAnalysisImage = computed(() => videoSourceAssets.value.find((asset) => asset.kind === 'image')?.file ?? null)
+const videoImagePreview = computed(() => primaryVideoSource.value?.kind === 'image' ? primaryVideoSource.value.previewUrl : '')
+const canGenerateVideo = computed(() => videoSourceAssets.value.length > 0 && !isSubmittingVideo.value)
 const canGenerateImage = computed(() => Boolean(imageFile.value) && !isSubmittingImage.value)
 const activeResolutionOptions = computed(() => {
   if (videoModel.value === 'doubao-seedance-2-0-260128') return resolutionOptions
   return resolutionOptions.filter((option) => option.value !== '1080p')
 })
 const activeVideo = computed(() => currentVideoJob.value?.result_video_url || '')
-const activeVideoImage = computed(() => videoImagePreview.value || currentVideoJob.value?.source_image_url || '')
-const activeImagePreview = computed(() => imagePreview.value || currentImageJob.value?.source_image_url || '')
-const recentImageJobs = computed(() => imageJobs.value.slice(0, 10))
-const totalJobs = computed(() => videoJobs.value.length + imageJobs.value.length)
-const videoStatusLabel = computed(() => (currentVideoJob.value ? statusText[currentVideoJob.value.status] : '待上传'))
-const imageStatusLabel = computed(() => (currentImageJob.value ? statusText[currentImageJob.value.status] : '待上传'))
-const imageGenerationProviderLabel = computed(() => {
-  if (currentImageJob.value?.provider_label) return currentImageJob.value.provider_label
-  return imageProviderOptions.find((option) => option.value === imageProvider.value)?.label ?? imageProvider.value
+const activeVideoSource = computed(() => primaryVideoSource.value?.kind === 'video' ? primaryVideoSource.value.previewUrl : '')
+const activeVideoImage = computed(() => {
+  const imageAsset = videoSourceAssets.value.find((asset) => asset.kind === 'image')
+  return imageAsset?.previewUrl || currentVideoJob.value?.source_image_url || ''
 })
-const imageGenerationTaskId = computed(() => currentImageJob.value?.remote_task_id || currentImageJob.value?.id || '创建中')
-const imageGenerationTime = computed(() => formatDateTime(currentImageJob.value?.created_at || imageSubmissionStartedAt.value))
+const finalImageJobs = computed(() => imageJobs.value.filter((job) => job.status === 'succeeded' || job.status === 'failed'))
+const recentVideoJobs = computed(() => videoJobs.value.slice(0, 10))
+const recentImageJobs = computed(() => finalImageJobs.value.slice(0, 10))
+const totalJobs = computed(() => videoJobs.value.length + imageJobs.value.length)
 const historyItems = computed(() =>
   [
     ...videoJobs.value.map((job) => ({ kind: '视频', id: job.id, provider: job.provider_label, status: job.status, created_at: job.created_at })),
@@ -178,10 +189,10 @@ function onVideoPromptBlur() {
 }
 
 async function analyzeVideoPrompt() {
-  if (!videoImageFile.value || isAnalyzingPrompt.value) return
+  if (!promptAnalysisImage.value || isAnalyzingPrompt.value) return
   isAnalyzingPrompt.value = true
   try {
-    const result = await analyzePrompt(videoImageFile.value)
+    const result = await analyzePrompt(promptAnalysisImage.value)
     videoPrompt.value = result.prompt
     message.success('AI 分析完成')
   } catch {
@@ -200,11 +211,38 @@ function statusColor(status: string) {
 
 function onVideoFileChange(event: Event) {
   const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  videoImageFile.value = file
-  if (videoImagePreview.value) URL.revokeObjectURL(videoImagePreview.value)
-  videoImagePreview.value = URL.createObjectURL(file)
+  const files = Array.from(input.files ?? [])
+  if (!files.length) return
+  if (files.length > VIDEO_SOURCE_MAX_FILES) {
+    message.error(`最多只能上传 ${VIDEO_SOURCE_MAX_FILES} 个素材`)
+    input.value = ''
+    return
+  }
+  const invalidType = files.find((file) => !VIDEO_SOURCE_ALLOWED_TYPES.has(file.type))
+  if (invalidType) {
+    message.error('仅支持 PNG/JPG/WEBP 图片和 MP4/MOV/WEBM 视频')
+    input.value = ''
+    return
+  }
+  const oversized = files.find((file) => file.size > VIDEO_SOURCE_MAX_BYTES)
+  if (oversized) {
+    message.error('单个素材不能超过 50MB')
+    input.value = ''
+    return
+  }
+  revokeVideoSourcePreviews()
+  videoSourceAssets.value = files.map((file) => ({
+    file,
+    previewUrl: URL.createObjectURL(file),
+    kind: file.type.startsWith('video/') ? 'video' : 'image',
+  }))
+  input.value = ''
+}
+
+function revokeVideoSourcePreviews() {
+  for (const asset of videoSourceAssets.value) {
+    URL.revokeObjectURL(asset.previewUrl)
+  }
 }
 
 function onImageFileChange(event: Event) {
@@ -228,7 +266,7 @@ async function loadJobs() {
 }
 
 async function submitVideoJob() {
-  if (!videoImageFile.value) return
+  if (!primaryVideoSource.value) return
   isSubmittingVideo.value = true
   try {
     currentVideoJob.value = await createVideoJob({
@@ -238,7 +276,8 @@ async function submitVideoJob() {
       aspect_ratio: videoAspectRatio.value,
       duration: videoDuration.value,
       resolution: videoResolution.value,
-      source_image: videoImageFile.value,
+      source_image: primaryVideoSource.value.file,
+      source_files: videoSourceFiles.value,
     })
     videoJobs.value = [currentVideoJob.value, ...videoJobs.value.filter((item) => item.id !== currentVideoJob.value?.id)]
     message.success('视频任务已提交')
@@ -326,6 +365,18 @@ function imageResultFileName(job: ImageJob, index: number) {
   return `cao-ai-task-${job.id}-result-${index + 1}.png`
 }
 
+function videoResultFileName(job: VideoJob) {
+  return `cao-ai-video-task-${job.id}.mp4`
+}
+
+function videoJobSourceVideo(job: VideoJob) {
+  return job.source_asset_urls?.find((asset) => asset.media_type === 'video')?.url || ''
+}
+
+function videoJobSourceImage(job: VideoJob) {
+  return job.source_asset_urls?.find((asset) => asset.media_type === 'image')?.url || job.source_image_url || ''
+}
+
 async function downloadImage(job: ImageJob, url: string, index: number) {
   try {
     const response = await fetch(url)
@@ -345,9 +396,40 @@ async function downloadImage(job: ImageJob, url: string, index: number) {
   }
 }
 
+async function downloadVideo(job: VideoJob) {
+  if (!job.result_video_url) return
+  try {
+    const response = await fetch(job.result_video_url)
+    if (!response.ok) throw new Error(`Download failed: ${response.status}`)
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = videoResultFileName(job)
+    anchor.rel = 'noopener'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(objectUrl)
+  } catch {
+    message.error('视频下载失败，请稍后重试')
+  }
+}
+
+
 async function downloadAllImages(job: ImageJob) {
   for (const [index, url] of job.result_image_urls.entries()) {
     await downloadImage(job, url, index)
+  }
+}
+
+async function copyVideoTaskId(job: VideoJob) {
+  const taskId = String(job.remote_task_id || job.id)
+  try {
+    await navigator.clipboard.writeText(taskId)
+    message.success('任务 ID 已复制')
+  } catch {
+    message.error('复制失败，请手动复制任务 ID')
   }
 }
 
@@ -361,6 +443,15 @@ async function copyImageTaskId(job: ImageJob) {
   }
 }
 
+function reuseVideoSettings(job: VideoJob) {
+  videoModel.value = job.model_name || videoModel.value
+  videoPrompt.value = job.prompt
+  videoAspectRatio.value = job.aspect_ratio
+  videoDuration.value = job.duration
+  videoResolution.value = job.resolution
+  message.success('视频参数已载入，可调整后再次生成')
+}
+
 function reuseImageSettings(job: ImageJob) {
   imageProvider.value = job.provider
   imagePrompt.value = job.prompt
@@ -368,10 +459,6 @@ function reuseImageSettings(job: ImageJob) {
   imageSize.value = job.size
   imageCount.value = job.count
   message.success('参数已载入，可调整后再次生成')
-}
-
-function isImageJobGenerating(job: ImageJob) {
-  return ['pending', 'submitted', 'processing'].includes(job.status)
 }
 
 function stopVideoPolling() {
@@ -389,7 +476,7 @@ onUnmounted(() => {
   stopVideoPolling()
   stopImagePolling()
   stopImageProgress()
-  if (videoImagePreview.value) URL.revokeObjectURL(videoImagePreview.value)
+  revokeVideoSourcePreviews()
   if (imagePreview.value) URL.revokeObjectURL(imagePreview.value)
 })
 </script>
@@ -438,7 +525,7 @@ onUnmounted(() => {
         </nav>
 
         <div class="rail-card">
-          <span>今日工作台</span>
+          <span>今日工作数</span>
           <strong>{{ totalJobs }}</strong>
           <small>已载入任务</small>
         </div>
@@ -448,8 +535,8 @@ onUnmounted(() => {
         <header class="hero">
           <div>
             <p class="eyebrow">IMAGE TO VIDEO / PRODUCT STUDIO</p>
-            <h1>商品影棚创作台</h1>
-            <p class="summary">把一张商品图推进到可交付的短视频：上传素材、套用影棚提示词、监听生成状态，然后回到最近任务继续迭代。</p>
+            <h1>TikTok带货视频创作平台</h1>
+            <p class="summary">把商品素材推进到可交付的短视频：上传素材、设置提示词、监听生成状态，然后查看生成结果。</p>
           </div>
           <div class="hero-actions">
             <a-button @click="loadJobs">刷新任务</a-button>
@@ -459,21 +546,14 @@ onUnmounted(() => {
           </div>
         </header>
 
-        <section class="flow-strip" aria-label="创作流程">
-          <div class="flow-heading">创作流程</div>
-          <div><span>01</span><strong>导入商品图</strong><small>{{ videoImageFile ? '素材已就绪' : '等待上传' }}</small></div>
-          <div><span>02</span><strong>设置镜头语言</strong><small>{{ videoAspectRatio }} / {{ videoDuration }} 秒 / {{ videoResolution }}</small></div>
-          <div><span>03</span><strong>生成与回看</strong><small>{{ videoStatusLabel }}</small></div>
-        </section>
-
         <div class="studio-grid">
           <section class="panel controls">
             <div class="panel-title">
               <span>创作参数</span>
               <small>视频模式</small>
             </div>
-            <label class="upload-zone">
-              <input type="file" accept="image/*" @change="onVideoFileChange" />
+            <label class="upload-zone video-upload-zone">
+              <input type="file" :accept="VIDEO_SOURCE_ACCEPT" multiple @change="onVideoFileChange" />
               <img v-if="videoImagePreview" :src="videoImagePreview" alt="视频参考图" />
               <div v-else>
                 <CloudUploadOutlined />
@@ -481,6 +561,25 @@ onUnmounted(() => {
                 <span>建议使用干净主图，PNG / JPG / WEBP</span>
               </div>
             </label>
+
+            <p class="video-upload-rule">支持 PNG / JPG / WEBP 图片和 MP4 / MOV / WEBM 视频，最多 3 个，单文件不超过 50MB。</p>
+
+            <div v-if="videoSourceAssets.length" class="asset-selection-list">
+              <div class="asset-selection-head">
+                <span>已选素材</span>
+                <strong>{{ videoSourceAssets.length }} / 3</strong>
+              </div>
+              <div class="asset-selection-items">
+                <article v-for="(asset, index) in videoSourceAssets" :key="asset.previewUrl" class="asset-selection-item">
+                  <img v-if="asset.kind === 'image'" :src="asset.previewUrl" alt="上传图片素材" />
+                  <video v-else :src="asset.previewUrl" muted playsinline />
+                  <div>
+                    <strong>{{ index + 1 }}. {{ asset.file.name }}</strong>
+                    <span>{{ asset.kind === 'image' ? '图片' : '视频' }} / {{ (asset.file.size / 1024 / 1024).toFixed(1) }}MB</span>
+                  </div>
+                </article>
+              </div>
+            </div>
 
             <a-form layout="vertical">
               <a-form-item label="视频模型">
@@ -498,7 +597,7 @@ onUnmounted(() => {
               </a-form-item>
               <VideoPromptEditor
                 v-model="videoPrompt"
-                :image-ready="Boolean(videoImageFile)"
+                :image-ready="Boolean(promptAnalysisImage)"
                 :analyzing="isAnalyzingPrompt"
                 :is-default="isVideoPromptDefault"
                 @focus="onVideoPromptFocus"
@@ -523,20 +622,100 @@ onUnmounted(() => {
             </a-button>
           </section>
 
-          <section class="panel preview">
+          <section class="panel preview video-result-panel recent-results-panel">
             <div class="panel-title">
-              <span>影棚预览</span>
-              <a-tag v-if="currentVideoJob" :color="statusColor(currentVideoJob.status)">
-                {{ statusText[currentVideoJob.status] }}
-              </a-tag>
-              <a-tag v-else>待上传</a-tag>
+              <span>生成结果</span>
+              <small>最近 {{ recentVideoJobs.length }} 条</small>
             </div>
+            <a-empty v-if="!recentVideoJobs.length" class="video-result-empty" description="暂无生成结果，上传素材后开始第一条视频创作" />
+
+            <div v-if="recentVideoJobs.length" class="result-record-list">
+              <article
+                v-for="job in recentVideoJobs"
+                :key="job.id"
+                class="result-record image-result-detail video-result-detail"
+                :class="`result-record-${job.status}`"
+                :data-testid="job.status === 'succeeded' ? 'video-result-detail' : ['pending', 'submitted', 'processing'].includes(job.status) ? 'video-generation-stage' : job.status === 'failed' ? 'video-result-failed' : undefined"
+              >
+                <header class="result-detail-header">
+                  <div class="result-detail-identity">
+                    <video v-if="videoJobSourceVideo(job)" :src="videoJobSourceVideo(job)" muted playsinline />
+                    <img v-else-if="videoJobSourceImage(job)" :src="videoJobSourceImage(job)" alt="任务参考素材" />
+                    <div v-else class="generation-thumb-placeholder"><PlayCircleOutlined /></div>
+                    <div class="result-detail-heading">
+                      <div class="generation-specs">
+                        <span>模型：{{ job.model_name || job.provider_label }}</span>
+                        <i></i>
+                        <span>分辨率：{{ job.resolution }}</span>
+                        <i></i>
+                        <span>画面比例：{{ job.aspect_ratio }}</span>
+                        <i></i>
+                        <span>视频时长：{{ job.duration }} 秒</span>
+                      </div>
+                      <div class="generation-subline">{{ formatDateTime(job.created_at) }} / 任务 ID：{{ job.remote_task_id || job.id }}</div>
+                      <span class="generation-badge" :class="`generation-badge-${job.status}`">商品视频 · {{ statusText[job.status] }}</span>
+                    </div>
+                  </div>
+                  <div class="result-detail-actions">
+                    <a-button
+                      v-if="job.status === 'succeeded' && job.result_video_url"
+                      data-testid="download-video"
+                      @click="downloadVideo(job)"
+                    >
+                      <DownloadOutlined />下载视频
+                    </a-button>
+                    <a-button @click="copyVideoTaskId(job)"><CopyOutlined />复制任务 ID</a-button>
+                    <a-button @click="reuseVideoSettings(job)"><FormOutlined />复用参数</a-button>
+                  </div>
+                </header>
+
+                <div class="result-detail-context">
+                  <section class="result-prompt-card">
+                    <span>生成提示词</span>
+                    <p>{{ job.prompt || '未填写提示词' }}</p>
+                  </section>
+                  <section class="result-source-card">
+                    <div>
+                      <span>原始参考素材</span>
+                      <small>用于本次视频生成任务</small>
+                    </div>
+                    <video v-if="videoJobSourceVideo(job)" :src="videoJobSourceVideo(job)" controls muted />
+                    <a v-else-if="videoJobSourceImage(job)" :href="videoJobSourceImage(job)" target="_blank" rel="noopener">
+                      <img :src="videoJobSourceImage(job)" alt="原始参考素材" />
+                    </a>
+                  </section>
+                </div>
+
+                <section v-if="job.status === 'succeeded' && job.result_video_url" class="video-result-player">
+                  <div class="result-gallery-heading">
+                    <div><span>生成结果</span><small>共 1 条视频</small></div>
+                    <a-tag color="success">生成完成</a-tag>
+                  </div>
+                  <video :src="job.result_video_url" controls />
+                </section>
+
+                <section v-else-if="['pending', 'submitted', 'processing'].includes(job.status)" class="record-generation-progress">
+                  <div class="generation-orbit" aria-hidden="true"><PlayCircleOutlined /></div>
+                  <div class="generation-progress-copy">
+                    <strong>AI 视频生成中</strong>
+                    <span>任务正在处理，每 3 秒自动刷新，完成后会显示最终视频。</span>
+                  </div>
+                  <div class="generation-progress-track" role="progressbar" aria-label="视频生成进度">
+                    <span style="width: 38%"></span>
+                  </div>
+                </section>
+
+                <a-alert v-else-if="job.status === 'failed'" type="error" show-icon :message="job.error_message || '生成失败'" />
+              </article>
+            </div>
+
             <div class="monitor">
               <video v-if="activeVideo" :src="activeVideo" controls />
+              <video v-else-if="activeVideoSource" :src="activeVideoSource" controls muted />
               <img v-else-if="activeVideoImage" :src="activeVideoImage" alt="当前商品图" />
               <div v-else class="empty-monitor">
                 <span class="scanline"></span>
-                <strong>等待商品图进入影棚</strong>
+                <strong>等待商品素材进入影棚</strong>
                 <p>上传后会在这里查看原图、生成进度和最终视频。</p>
               </div>
             </div>
@@ -564,13 +743,6 @@ onUnmounted(() => {
             </a-button>
           </div>
         </header>
-
-        <section class="flow-strip" aria-label="创作流程">
-          <div class="flow-heading">创作流程</div>
-          <div><span>01</span><strong>上传参考图</strong><small>{{ imageFile ? '素材已就绪' : '等待上传' }}</small></div>
-          <div><span>02</span><strong>选择出图规格</strong><small>{{ imageAspectRatio }} / {{ imageSize }} / {{ imageCount }} 张</small></div>
-          <div><span>03</span><strong>挑选结果</strong><small>{{ imageStatusLabel }}</small></div>
-        </section>
 
         <div class="studio-grid">
           <section class="panel controls">
@@ -619,37 +791,7 @@ onUnmounted(() => {
               <small>最近 {{ recentImageJobs.length }} 条</small>
             </div>
 
-            <div v-if="isSubmittingImage" data-testid="image-generation-stage" class="image-generation-stage result-record">
-              <div class="generation-summary">
-                <img v-if="activeImagePreview" :src="activeImagePreview" alt="生成任务参考图" />
-                <div v-else class="generation-thumb-placeholder"><FileImageOutlined /></div>
-                <div class="generation-details">
-                  <div class="generation-specs">
-                    <span>模型：{{ imageGenerationProviderLabel }}</span>
-                    <i></i>
-                    <span>分辨率：{{ currentImageJob?.size || imageSize }}</span>
-                    <i></i>
-                    <span>模型品质：标准</span>
-                    <i></i>
-                    <span>生图类型：商品场景图</span>
-                  </div>
-                  <div class="generation-subline">{{ imageGenerationTime }} / 任务 ID：{{ imageGenerationTaskId }}</div>
-                  <span class="generation-badge">商品场景图</span>
-                </div>
-              </div>
-              <div class="generation-canvas">
-                <div class="generation-orbit" aria-hidden="true"><FileImageOutlined /></div>
-                <div class="generation-progress-copy">
-                  <strong>AI 生成中… {{ imageEstimatedProgress }}%</strong>
-                  <span>正在构建光线、背景与商品细节</span>
-                </div>
-                <div class="generation-progress-track" role="progressbar" aria-label="图片预计生成进度" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="imageEstimatedProgress">
-                  <span :style="{ width: `${imageEstimatedProgress}%` }"></span>
-                </div>
-              </div>
-            </div>
-
-            <a-empty v-if="!isSubmittingImage && !recentImageJobs.length" description="暂无生成结果，上传参考图后开始第一张创作" />
+            <a-empty v-if="!recentImageJobs.length" description="暂无生成结果，上传参考图后开始第一张创作" />
 
             <div v-if="recentImageJobs.length" class="result-record-list">
               <article
@@ -657,7 +799,7 @@ onUnmounted(() => {
                 :key="job.id"
                 class="result-record image-result-detail"
                 :class="`result-record-${job.status}`"
-                :data-testid="job.status === 'succeeded' ? 'image-result-detail' : isImageJobGenerating(job) ? 'image-generation-stage' : undefined"
+                :data-testid="job.status === 'succeeded' ? 'image-result-detail' : job.status === 'failed' ? 'image-result-failed' : undefined"
               >
               <header class="result-detail-header">
                 <div class="result-detail-identity">
@@ -687,7 +829,7 @@ onUnmounted(() => {
               <div class="result-detail-context">
                 <section class="result-prompt-card">
                   <span>生成提示词</span>
-                  <p>{{ job.prompt || '未填写提示词' }}</p>
+                  <p>{{ job.prompt || '鏈～鍐欐彁绀鸿瘝' }}</p>
                 </section>
                 <section class="result-source-card">
                   <div>
@@ -718,17 +860,6 @@ onUnmounted(() => {
                       <img :src="url" :alt="`生成结果 ${index + 1}`" />
                     </a>
                   </div>
-                </div>
-              </section>
-
-              <section v-else-if="isImageJobGenerating(job)" class="record-generation-progress">
-                <div class="generation-orbit" aria-hidden="true"><FileImageOutlined /></div>
-                <div class="generation-progress-copy">
-                  <strong>AI 生成中… {{ currentImageJob?.id === job.id ? imageEstimatedProgress : 8 }}%</strong>
-                  <span>任务正在处理中，完成后会自动展示全部结果</span>
-                </div>
-                <div class="generation-progress-track" role="progressbar" aria-label="图片预计生成进度" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="currentImageJob?.id === job.id ? imageEstimatedProgress : 8">
-                  <span :style="{ width: `${currentImageJob?.id === job.id ? imageEstimatedProgress : 8}%` }"></span>
                 </div>
               </section>
 
