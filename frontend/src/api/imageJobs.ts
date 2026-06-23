@@ -5,7 +5,7 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL?.trim() || '/api',
 })
 
-export type ImageProviderName = 'aliyun' | 'seedream'
+export type ImageProviderName = 'aliyun' | 'seedream' | 'openai'
 
 export interface ImageJob {
   id: number

@@ -60,6 +60,7 @@ class ImageJob(models.Model):
         ALIYUN = "aliyun", "阿里 wan2.7-image"
         SEEDREAM = "seedream", "字节 Seedream 4.5"
 
+        OPENAI = "openai", "Image2模型"
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         SUBMITTED = "submitted", "Submitted"

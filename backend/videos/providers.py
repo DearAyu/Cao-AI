@@ -44,9 +44,32 @@ def raise_for_bad_response(response: requests.Response, provider_name: str) -> N
     try:
         response.raise_for_status()
     except requests.HTTPError as exc:
-        body = getattr(response, "text", "") or ""
-        status_code = getattr(response, "status_code", "unknown")
-        raise ProviderError(f"{provider_name} HTTP {status_code}: {body[:1000]}") from exc
+        raise ProviderError(format_provider_http_error(response, provider_name)) from exc
+
+
+def format_provider_http_error(response: requests.Response, provider_name: str) -> str:
+    body = getattr(response, "text", "") or ""
+    status_code = getattr(response, "status_code", "unknown")
+    parsed: Any | None = None
+    try:
+        parsed = response.json()
+    except (ValueError, AttributeError):
+        parsed = None
+
+    if isinstance(parsed, dict):
+        error = parsed.get("error")
+        if isinstance(error, dict):
+            code = error.get("code")
+            message = str(error.get("message") or "")
+            if code == "moderation_blocked":
+                return (
+                    f"{provider_name} 内容被安全审核拦截：请调整提示词或参考图，"
+                    "避免成人/色情、暴露、未成年人、暴力等敏感内容后重试。"
+                )
+            if message:
+                return f"{provider_name} HTTP {status_code}: {message[:500]}"
+
+    return f"{provider_name} HTTP {status_code}: {body[:1000]}"
 
 
 def image_as_data_url(job: VideoJob) -> str:

@@ -1,1 +1,35 @@
 Watching for file changes with StatReloader
+[23/Jun/2026 22:01:17] "GET /api/image-jobs/ HTTP/1.1" 200 2908402
+[23/Jun/2026 22:01:18,949] - Broken pipe from ('127.0.0.1', 59736)
+[23/Jun/2026 22:01:32] "GET /api/image-jobs/ HTTP/1.1" 200 2908402
+[23/Jun/2026 22:01:32] "GET /api/video-jobs/ HTTP/1.1" 200 57832
+[23/Jun/2026 22:01:32] "GET /media/uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_0QRRLhy.jpg HTTP/1.1" 200 725505
+[23/Jun/2026 22:01:32] "GET /media/uploads/mock.png HTTP/1.1" 200 3
+[23/Jun/2026 22:01:32] "GET /media/uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_oYqDTOB.jpg HTTP/1.1" 200 725505
+[23/Jun/2026 22:01:32] "GET /media/uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_gAP1xA8.jpg HTTP/1.1" 200 725505
+[23/Jun/2026 22:01:32] "GET /media/uploads/123.webp HTTP/1.1" 200 34514
+[23/Jun/2026 22:01:32] "GET /media/uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_EOAVR6D.jpg HTTP/1.1" 200 725505
+[23/Jun/2026 22:01:33] "GET /media/results/job-9-mock.mp4 HTTP/1.1" 200 512715
+[23/Jun/2026 22:01:33] "GET /media/results/job-8-mock.mp4 HTTP/1.1" 200 512715
+[23/Jun/2026 22:01:33] "GET /media/uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_hOnDeLd.jpg HTTP/1.1" 200 725505
+[23/Jun/2026 22:01:33] "GET /media/uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_UNpk6rn.jpg HTTP/1.1" 200 725505
+[23/Jun/2026 22:01:33] "GET /media/video_assets/view.mp4 HTTP/1.1" 200 2016817
+[23/Jun/2026 22:01:33] "GET /media/video_assets/view.mp4 HTTP/1.1" 200 2016817
+[23/Jun/2026 22:01:33] "GET /media/results/job-5-mock.mp4 HTTP/1.1" 200 512715
+[23/Jun/2026 22:01:33] "GET /media/results/job-7-mock.mp4 HTTP/1.1" 200 512715
+[23/Jun/2026 22:01:33] "GET /media/results/job-6-mock.mp4 HTTP/1.1" 200 512715
+[23/Jun/2026 22:01:33] "GET /media/results/job-1.mp4 HTTP/1.1" 200 1891347
+[23/Jun/2026 22:01:42] "GET /media/image_uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_LRSvMwp.jpg HTTP/1.1" 200 725505
+[23/Jun/2026 22:01:42] "GET /media/image_uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_Ko4DaJ1.jpg HTTP/1.1" 200 725505
+[23/Jun/2026 22:01:42] "GET /media/image_uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_HF0V5WC.jpg HTTP/1.1" 200 725505
+[23/Jun/2026 22:01:42] "GET /media/image_uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_Moqu8Sl.jpg HTTP/1.1" 200 725505
+[23/Jun/2026 22:01:42] "GET /media/images/job-4-1.jpeg HTTP/1.1" 200 1284441
+[23/Jun/2026 22:01:42] "GET /media/image_uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_6SxzDrr.jpg HTTP/1.1" 200 725505
+[23/Jun/2026 22:01:42] "GET /media/images/job-3-1.png HTTP/1.1" 200 5812887
+[23/Jun/2026 22:01:42] "GET /media/images/job-1-1.png HTTP/1.1" 200 5532222
+[23/Jun/2026 22:02:03] "POST /api/image-jobs/ HTTP/1.1" 201 1313
+[23/Jun/2026 22:02:03] "GET /media/image_uploads/%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260615221735_45_28_BsdsTuw.jpg HTTP/1.1" 200 725505
+E:\CodexProject\Cao AI\backend\videos\providers.py changed, reloading.
+Watching for file changes with StatReloader
+[23/Jun/2026 22:04:37] "GET /api/image-jobs/ HTTP/1.1" 200 2909716
+[23/Jun/2026 22:04:39,574] - Broken pipe from ('127.0.0.1', 60136)

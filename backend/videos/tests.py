@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from .image_providers import AliWanImageProvider, SeedreamImageProvider
+from .image_providers import AliWanImageProvider, OpenAIImageProvider, SeedreamImageProvider
 from .models import ImageJob, VideoJob, VideoJobAsset
 from .prompt_analysis import (
     PROMPT_ANALYSIS_INSTRUCTION,
@@ -23,7 +23,7 @@ from .prompt_assistant import (
     generate_video_prompt,
     load_prompt_rules,
 )
-from .providers import AliWanxiangProvider, VolcengineSeedanceProvider
+from .providers import AliWanxiangProvider, ProviderError, VolcengineSeedanceProvider, raise_for_bad_response
 
 
 MEDIA_ROOT = tempfile.mkdtemp()
@@ -712,6 +712,22 @@ class ImageJobApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("provider", response.data)
 
+    def test_create_accepts_openai_image_provider(self):
+        response = self.client.post(
+            reverse("image-job-list"),
+            {
+                "provider": "openai",
+                "prompt": "Generate a clean ecommerce hero image",
+                "source_image": self.image_file(),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["provider"], "openai")
+        self.assertEqual(response.data["provider_label"], "Image2模型")
+        self.assertTrue(response.data["remote_task_id"].startswith("mock-image-openai"))
+
     def test_create_submits_mock_image_job_and_lists_it(self):
         response = self.client.post(
             reverse("image-job-list"),
@@ -762,6 +778,34 @@ class ImageJobApiTests(TestCase):
         self.assertEqual(response.data["status"], "succeeded")
         self.assertIn("images/demo.png", response.data["result_images"])
         download.assert_called_once()
+
+
+class ProviderErrorFormattingTests(TestCase):
+    def test_moderation_blocked_error_is_user_friendly(self):
+        class Response:
+            status_code = 400
+            text = '{"error":{"message":"Your request was rejected by the safety system.","code":"moderation_blocked"}}'
+
+            def raise_for_status(self):
+                import requests
+
+                raise requests.HTTPError("400 Client Error")
+
+            def json(self):
+                return {
+                    "error": {
+                        "message": "Your request was rejected by the safety system.",
+                        "code": "moderation_blocked",
+                    }
+                }
+
+        with self.assertRaises(ProviderError) as error:
+            raise_for_bad_response(Response(), "OpenAI image")
+
+        message = str(error.exception)
+        self.assertIn("内容被安全审核拦截", message)
+        self.assertIn("请调整提示词或参考图", message)
+        self.assertNotIn("Your request was rejected", message)
 
 
 @override_settings(
@@ -848,3 +892,42 @@ class ImageProviderTests(TestCase):
         self.assertEqual(payload["model"], "doubao-seedream-4-5-251128")
         self.assertTrue(payload["image"].startswith("data:image/png;base64,"))
         self.assertEqual(post.call_args.args[0], "https://ark.cn-beijing.volces.com/api/v3/images/generations")
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_BASE_URL="https://api.openai.com/v1",
+        OPENAI_IMAGE_MODEL="gpt-image-2",
+    )
+    def test_openai_image2_submit_uses_image_edit_endpoint(self):
+        job = ImageJob.objects.create(
+            provider="openai",
+            prompt="Create a polished ecommerce product image",
+            aspect_ratio="1:1",
+            size="2K",
+            count=2,
+            source_image=self.image_file(),
+        )
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "id": "openai-image-1",
+                    "data": [{"b64_json": base64.b64encode(b"png-result").decode("ascii")}],
+                }
+
+        with patch("videos.image_providers.requests.post", return_value=Response()) as post:
+            result = OpenAIImageProvider().submit(job)
+
+        self.assertEqual(result["status"], ImageJob.Status.SUCCEEDED)
+        self.assertEqual(result["remote_task_id"], "openai-image-1")
+        self.assertEqual(result["result_images_base64"], [base64.b64encode(b"png-result").decode("ascii")])
+        self.assertEqual(post.call_args.args[0], "https://api.openai.com/v1/images/edits")
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer test-key")
+        self.assertEqual(post.call_args.kwargs["data"]["model"], "gpt-image-2")
+        self.assertEqual(post.call_args.kwargs["data"]["prompt"], "Create a polished ecommerce product image")
+        self.assertEqual(post.call_args.kwargs["data"]["n"], "2")
+        self.assertEqual(post.call_args.kwargs["data"]["size"], "2048x2048")
+        self.assertIn("image[]", post.call_args.kwargs["files"])

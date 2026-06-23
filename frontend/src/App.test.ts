@@ -48,6 +48,50 @@ describe('Cao AI workbench', () => {
     expect(wrapper.text()).toContain('Doubao-Seedance-2.0-fast')
   })
 
+  it('collapses and expands the desktop sidebar shell', async () => {
+    const wrapper = mountApp()
+    const toggle = wrapper.get('[data-testid="rail-collapse-toggle"]')
+
+    expect(wrapper.get('.shell').classes()).not.toContain('rail-collapsed')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+
+    await toggle.trigger('click')
+
+    expect(wrapper.get('.shell').classes()).toContain('rail-collapsed')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+
+    await toggle.trigger('click')
+
+    expect(wrapper.get('.shell').classes()).not.toContain('rail-collapsed')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+  })
+
+  it('opens and closes the mobile sidebar drawer', async () => {
+    const wrapper = mountApp()
+
+    expect(wrapper.get('.shell').classes()).not.toContain('rail-open')
+
+    await wrapper.get('[data-testid="mobile-rail-open"]').trigger('click')
+
+    expect(wrapper.get('.shell').classes()).toContain('rail-open')
+    expect(wrapper.find('[data-testid="mobile-rail-scrim"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="mobile-rail-scrim"]').trigger('click')
+
+    expect(wrapper.get('.shell').classes()).not.toContain('rail-open')
+    expect(wrapper.find('[data-testid="mobile-rail-scrim"]').exists()).toBe(false)
+  })
+
+  it('closes the mobile drawer after selecting a navigation item', async () => {
+    const wrapper = mountApp()
+
+    await wrapper.get('[data-testid="mobile-rail-open"]').trigger('click')
+    await wrapper.findAll('.nav-item')[1].trigger('click')
+
+    expect(wrapper.get('.shell').classes()).not.toContain('rail-open')
+    expect(wrapper.find('[data-testid="generate-image-button"]').exists()).toBe(true)
+  })
+
   it('does not render prompt preset cards in either workspace', async () => {
     const wrapper = mountApp()
 
@@ -462,9 +506,73 @@ describe('Cao AI workbench', () => {
     const wrapper = mountApp()
     await wrapper.findAll('.nav-item')[1].trigger('click')
 
-    expect(wrapper.text()).toContain('阿里 wan2.7-image')
-    expect(wrapper.text()).toContain('字节 Seedream 4.5')
+    const imageModelSelectOptions = wrapper.findAllComponents({ name: 'ASelect' })[0].props('options')
+    expect(imageModelSelectOptions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: '阿里 wan2.7-image', value: 'aliyun' }),
+      expect.objectContaining({ label: '字节 Seedream 4.5', value: 'seedream' }),
+      expect.objectContaining({ label: 'Image2模型', value: 'openai' }),
+    ]))
     expect(wrapper.find('[data-testid="generate-image-button"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('renders image model selection as a dropdown with Image2 and prompt helper behavior', async () => {
+    const wrapper = mountApp()
+    await wrapper.findAll('.nav-item')[1].trigger('click')
+    const formLabels = wrapper.findAll('.ant-form-item-label label').map((label) => label.text())
+    const textarea = wrapper.find('textarea')
+
+    expect(formLabels).toContain('图片选择')
+    expect(formLabels).toContain('提示词')
+    expect(formLabels).not.toContain('厂商')
+    expect(formLabels).not.toContain('场景提示词')
+    expect(wrapper.findAllComponents({ name: 'ASelect' })[0].props('options')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Image2模型', value: 'openai' }),
+    ]))
+    expect(wrapper.findComponent({ name: 'ASegmented' }).exists()).toBe(false)
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('商品信息包含商品卖点、使用方式、销售地区、发布平台等生图效果将会更好')
+    expect(textarea.attributes('style')).toContain('color: rgb(140, 140, 140)')
+
+    await textarea.trigger('focus')
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('')
+
+    await textarea.trigger('blur')
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('商品信息包含商品卖点、使用方式、销售地区、发布平台等生图效果将会更好')
+  })
+
+  it('submits Image2 provider without sending the helper text as the prompt', async () => {
+    ;(createImageJob as Mock).mockResolvedValueOnce({
+      id: 34,
+      provider: 'openai',
+      provider_label: 'Image2模型',
+      status: 'submitted',
+      prompt: '',
+      aspect_ratio: '1:1',
+      size: '2K',
+      count: 1,
+      source_image_url: '/media/source.png',
+      remote_task_id: 'image-task-openai',
+      result_images: [],
+      result_image_urls: [],
+      error_message: '',
+      created_at: '2026-06-19T13:03:36Z',
+      updated_at: '2026-06-19T13:03:36Z',
+    })
+    const wrapper = mountApp()
+    await wrapper.findAll('.nav-item')[1].trigger('click')
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'product.png', { type: 'image/png' })],
+    })
+    await input.trigger('change')
+    const selects = wrapper.findAllComponents({ name: 'ASelect' })
+    await selects[0].vm.$emit('update:value', 'openai')
+
+    await wrapper.get('[data-testid="generate-image-button"]').trigger('click')
+
+    expect(createImageJob).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'openai',
+      prompt: '',
+    }))
   })
 
   it('does not render a submitted image job as a generation result', async () => {

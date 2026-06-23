@@ -1,3 +1,4 @@
+import base64
 from pathlib import Path
 from shutil import copyfile
 from urllib.parse import urlparse
@@ -137,6 +138,12 @@ def apply_image_result(job: ImageJob, result: dict) -> None:
             str(download_image(url, job, index).relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
             for index, url in enumerate(result_urls, start=1)
         ]
+    result_images_base64 = result.get("result_images_base64") or []
+    if job.status == ImageJob.Status.SUCCEEDED and result_images_base64 and not job.result_images:
+        job.result_images = [
+            str(write_base64_image(image, job, index).relative_to(settings.MEDIA_ROOT)).replace("\\", "/")
+            for index, image in enumerate(result_images_base64, start=1)
+        ]
 
 
 def get_image_refresh_provider(job: ImageJob):
@@ -156,4 +163,14 @@ def download_image(url: str, job: ImageJob, index: int) -> Path:
         for chunk in response.iter_content(chunk_size=1024 * 128):
             if chunk:
                 handle.write(chunk)
+    return target
+
+
+def write_base64_image(image_base64: str, job: ImageJob, index: int) -> Path:
+    images_dir = Path(settings.MEDIA_ROOT) / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    target = images_dir / f"job-{job.pk}-{index}.png"
+    _, _, payload = image_base64.partition(",")
+    raw = base64.b64decode(payload or image_base64)
+    target.write_bytes(raw)
     return target

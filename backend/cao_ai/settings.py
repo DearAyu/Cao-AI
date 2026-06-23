@@ -152,6 +152,10 @@ ALIYUN_MODEL = os.getenv("ALIYUN_MODEL", "wan2.7-i2v")
 ALIYUN_IMAGE_MODEL = os.getenv("ALIYUN_IMAGE_MODEL", "wan2.7-image")
 SEEDREAM_IMAGE_MODEL = os.getenv("SEEDREAM_IMAGE_MODEL", "doubao-seedream-4-5-251128")
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
+
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")

@@ -8,6 +8,8 @@ import {
   FileImageOutlined,
   FormOutlined,
   HistoryOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   PlayCircleOutlined,
   ProjectOutlined,
   RocketOutlined,
@@ -44,6 +46,8 @@ const VIDEO_SOURCE_ACCEPT = 'image/png,image/jpeg,image/webp,video/mp4,video/qui
 const VIDEO_SOURCE_ALLOWED_TYPES = new Set(VIDEO_SOURCE_ACCEPT.split(','))
 
 const mode = ref<WorkspaceMode>('video')
+const isRailCollapsed = ref(false)
+const isMobileRailOpen = ref(false)
 
 const DEFAULT_VIDEO_PROMPT = '输入视频中想要的主体动作场景，使用 英文更准确。例如，"一个美女在展示身上的服装，镜头由远到近推进"等'
 const videoModel = ref('doubao-seedance-2-0-fast-260128')
@@ -59,7 +63,8 @@ const isSubmittingVideo = ref(false)
 const isAnalyzingPrompt = ref(false)
 
 const imageProvider = ref<ImageProviderName>('aliyun')
-const imagePrompt = ref('保留商品主体，生成一张干净高级的跨境电商商品场景图，柔和棚拍光，白紫色科技感背景。')
+const DEFAULT_IMAGE_PROMPT = '商品信息包含商品卖点、使用方式、销售地区、发布平台等生图效果将会更好'
+const imagePrompt = ref(DEFAULT_IMAGE_PROMPT)
 const imageAspectRatio = ref('1:1')
 const imageSize = ref('2K')
 const imageCount = ref(1)
@@ -95,6 +100,7 @@ const videoModelOptions = [
 const imageProviderOptions = [
   { label: '阿里 wan2.7-image', value: 'aliyun' },
   { label: '字节 Seedream 4.5', value: 'seedream' },
+  { label: 'Image2模型', value: 'openai' },
 ]
 
 const aspectRatioOptions = [
@@ -129,6 +135,7 @@ const promptAnalysisImage = computed(() => videoSourceAssets.value.find((asset) 
 const videoImagePreview = computed(() => primaryVideoSource.value?.kind === 'image' ? primaryVideoSource.value.previewUrl : '')
 const canGenerateVideo = computed(() => videoSourceAssets.value.length > 0 && !isSubmittingVideo.value)
 const canGenerateImage = computed(() => Boolean(imageFile.value) && !isSubmittingImage.value)
+const isImagePromptDefault = computed(() => imagePrompt.value === DEFAULT_IMAGE_PROMPT)
 const activeResolutionOptions = computed(() => {
   if (videoModel.value === 'doubao-seedance-2-0-260128') return resolutionOptions
   return resolutionOptions.filter((option) => option.value !== '1080p')
@@ -188,6 +195,14 @@ function onVideoPromptBlur() {
   if (!videoPrompt.value.trim()) videoPrompt.value = DEFAULT_VIDEO_PROMPT
 }
 
+function onImagePromptFocus() {
+  if (imagePrompt.value === DEFAULT_IMAGE_PROMPT) imagePrompt.value = ''
+}
+
+function onImagePromptBlur() {
+  if (!imagePrompt.value.trim()) imagePrompt.value = DEFAULT_IMAGE_PROMPT
+}
+
 async function analyzeVideoPrompt() {
   if (!promptAnalysisImage.value || isAnalyzingPrompt.value) return
   isAnalyzingPrompt.value = true
@@ -207,6 +222,23 @@ function statusColor(status: string) {
   if (status === 'failed') return 'error'
   if (status === 'processing' || status === 'submitted') return 'processing'
   return 'default'
+}
+
+function toggleRailCollapsed() {
+  isRailCollapsed.value = !isRailCollapsed.value
+}
+
+function openMobileRail() {
+  isMobileRailOpen.value = true
+}
+
+function closeMobileRail() {
+  isMobileRailOpen.value = false
+}
+
+function selectMode(nextMode: WorkspaceMode) {
+  mode.value = nextMode
+  closeMobileRail()
 }
 
 function onVideoFileChange(event: Event) {
@@ -297,7 +329,7 @@ async function submitImageJob() {
   try {
     currentImageJob.value = await createImageJob({
       provider: imageProvider.value,
-      prompt: imagePrompt.value,
+      prompt: isImagePromptDefault.value ? '' : imagePrompt.value,
       aspect_ratio: imageAspectRatio.value,
       size: imageSize.value,
       count: imageCount.value,
@@ -322,6 +354,7 @@ function startVideoPolling(id: number) {
   stopVideoPolling()
   videoPollTimer = window.setInterval(async () => {
     const job = await getVideoJob(id)
+    if (!job) return
     currentVideoJob.value = job
     videoJobs.value = [job, ...videoJobs.value.filter((item) => item.id !== job.id)]
     if (job.status === 'succeeded' || job.status === 'failed') stopVideoPolling()
@@ -332,6 +365,7 @@ function startImagePolling(id: number) {
   stopImagePolling()
   imagePollTimer = window.setInterval(async () => {
     const job = await getImageJob(id)
+    if (!job) return
     currentImageJob.value = job
     imageJobs.value = [job, ...imageJobs.value.filter((item) => item.id !== job.id)]
     if (job.status === 'succeeded' || job.status === 'failed') {
@@ -454,7 +488,7 @@ function reuseVideoSettings(job: VideoJob) {
 
 function reuseImageSettings(job: ImageJob) {
   imageProvider.value = job.provider
-  imagePrompt.value = job.prompt
+  imagePrompt.value = job.prompt || DEFAULT_IMAGE_PROMPT
   imageAspectRatio.value = job.aspect_ratio
   imageSize.value = job.size
   imageCount.value = job.count
@@ -491,33 +525,67 @@ onUnmounted(() => {
       },
     }"
   >
-    <main class="shell">
-      <aside class="rail">
-        <div class="brand">
+    <main class="shell" :class="{ 'rail-collapsed': isRailCollapsed, 'rail-open': isMobileRailOpen }">
+      <header class="mobile-topbar">
+        <div class="brand mobile-brand">
           <div class="brand-mark">C</div>
-          <div>
+          <div class="brand-copy">
             <strong>Cao AI</strong>
             <span>商品影棚系统</span>
           </div>
         </div>
+        <button
+          type="button"
+          class="mobile-menu-button"
+          data-testid="mobile-rail-open"
+          aria-label="打开侧边栏"
+          :aria-expanded="isMobileRailOpen"
+          @click="openMobileRail"
+        >
+          <MenuUnfoldOutlined />
+        </button>
+      </header>
+
+      <aside class="rail" aria-label="工作区侧边栏">
+        <div class="rail-head">
+          <div class="brand">
+            <div class="brand-mark">C</div>
+            <div class="brand-copy">
+              <strong>Cao AI</strong>
+              <span>商品影棚系统</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            class="rail-toggle"
+            data-testid="rail-collapse-toggle"
+            :aria-label="isRailCollapsed ? '展开侧边栏' : '收起侧边栏'"
+            :aria-expanded="!isRailCollapsed"
+            @click="toggleRailCollapsed"
+          >
+            <MenuUnfoldOutlined v-if="isRailCollapsed" />
+            <MenuFoldOutlined v-else />
+          </button>
+        </div>
 
         <nav class="nav" aria-label="工作区">
-          <button class="nav-item" :class="{ active: mode === 'video' }" @click="mode = 'video'">
+          <button class="nav-item" :class="{ active: mode === 'video' }" aria-label="视频生成" @click="selectMode('video')">
             <RocketOutlined />
             <span>视频生成</span>
             <small>Image to video</small>
           </button>
-          <button class="nav-item" :class="{ active: mode === 'image' }" @click="mode = 'image'">
+          <button class="nav-item" :class="{ active: mode === 'image' }" aria-label="图片生成" @click="selectMode('image')">
             <FileImageOutlined />
             <span>图片生成</span>
             <small>Image to image</small>
           </button>
-          <button class="nav-item" :class="{ active: mode === 'materials' }" @click="mode = 'materials'">
+          <button class="nav-item" :class="{ active: mode === 'materials' }" aria-label="商品素材" @click="selectMode('materials')">
             <ProjectOutlined />
             <span>商品素材</span>
             <small>Assets</small>
           </button>
-          <button class="nav-item" :class="{ active: mode === 'history' }" @click="mode = 'history'">
+          <button class="nav-item" :class="{ active: mode === 'history' }" aria-label="任务记录" @click="selectMode('history')">
             <HistoryOutlined />
             <span>任务记录</span>
             <small>History</small>
@@ -530,6 +598,14 @@ onUnmounted(() => {
           <small>已载入任务</small>
         </div>
       </aside>
+      <button
+        v-if="isMobileRailOpen"
+        type="button"
+        class="rail-scrim"
+        data-testid="mobile-rail-scrim"
+        aria-label="关闭侧边栏"
+        @click="closeMobileRail"
+      ></button>
 
       <section class="workspace" v-if="mode === 'video'">
         <header class="hero">
@@ -761,11 +837,20 @@ onUnmounted(() => {
             </label>
 
             <a-form layout="vertical">
-              <a-form-item label="厂商">
-                <a-segmented v-model:value="imageProvider" block :options="imageProviderOptions" />
+              <a-form-item label="图片选择">
+                <a-select v-model:value="imageProvider" :options="imageProviderOptions" />
               </a-form-item>
-              <a-form-item label="场景提示词">
-                <a-textarea v-model:value="imagePrompt" :rows="5" :maxLength="1500" show-count />
+              <a-form-item label="提示词">
+                <a-textarea
+                  v-model:value="imagePrompt"
+                  :class="{ 'image-prompt-textarea--muted': isImagePromptDefault }"
+                  :style="{ color: isImagePromptDefault ? '#8c8c8c' : undefined }"
+                  :rows="5"
+                  :maxLength="1500"
+                  show-count
+                  @focus="onImagePromptFocus"
+                  @blur="onImagePromptBlur"
+                />
               </a-form-item>
               <div class="form-row">
                 <a-form-item label="画面比例">
